@@ -171,6 +171,29 @@ class FarmerEngine:
                             selected_kind = "repair_step"
                             break
 
+            # Особое случайное событие «Встреча с игроком».
+            # Во время обычного фарма всегда выбираем «Ограбить», после чего
+            # следующая обработка сообщения автоматически продолжит исследование.
+            if (
+                selected is None
+                and not self.state.repair_mode
+                and (
+                    "встреча с игроком" in message_text
+                    or "вы столкнулись с" in message_text
+                )
+            ):
+                for button_text, row, column in buttons:
+                    if "ограбить" in button_text:
+                        selected = (
+                            button_text,
+                            row,
+                            column,
+                            "Ограбить игрока",
+                            None,
+                        )
+                        selected_kind = "player_encounter"
+                        break
+
             # Случайные события во время исследования.
             # Сначала выбираем безопасный выход «Отказаться от события», чтобы не тратить золото.
             # Если такой кнопки нет, нажимаем последнюю доступную кнопку события.
