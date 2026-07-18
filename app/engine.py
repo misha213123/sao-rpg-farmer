@@ -13,7 +13,6 @@ from app.rules import (
     LOW_RESOURCE_MARKERS,
     NEVER_CLICK,
     REPAIR_FLOW,
-    RETURN_TO_FLOOR_FLOW,
     STAMINA_BUTTON_MARKERS,
     STANDARD_RULES,
     WORN_EQUIPMENT_MARKERS,
@@ -86,7 +85,6 @@ class FarmerEngine:
             selected: tuple[str, object, str, str | None] | None = None
             selected_kind: str | None = None
 
-            # Если игра сообщила об износе, запускаем маршрут с первого шага.
             if contains_any(message_text, WORN_EQUIPMENT_MARKERS):
                 if not self.state.repair_mode:
                     logger.info("Worn equipment detected; starting repair flow")
@@ -95,7 +93,6 @@ class FarmerEngine:
                 self.state.return_to_floor_mode = False
                 self.state.return_to_floor_step = 0
 
-            # Зелье стамины нажимается только при явном предупреждении о ресурсах.
             if contains_any(message_text, LOW_RESOURCE_MARKERS):
                 for button_text, button in buttons:
                     if contains_any(button_text, STAMINA_BUTTON_MARKERS):
@@ -103,7 +100,6 @@ class FarmerEngine:
                         selected_kind = "stamina"
                         break
 
-            # Строгий маршрут починки.
             if selected is None and self.state.repair_mode:
                 if self.state.repair_step < len(REPAIR_FLOW):
                     markers, action_name = REPAIR_FLOW[self.state.repair_step]
@@ -113,22 +109,31 @@ class FarmerEngine:
                             selected_kind = "repair_step"
                             break
 
-            # После запуска или починки возвращаемся на выбранный этаж:
-            # Главное меню -> Исследовать -> выбранный этаж.
+            # Возврат после /start, выбора этажа или починки:
+            # Главное меню -> Исследовать -> этаж -> последняя кнопка с «локация» -> Начать исследование.
             if (
                 selected is None
                 and not self.state.repair_mode
                 and self.state.return_to_floor_mode
                 and self.state.target_floor is not None
             ):
-                if self.state.return_to_floor_step < len(RETURN_TO_FLOOR_FLOW):
-                    markers, action_name = RETURN_TO_FLOOR_FLOW[self.state.return_to_floor_step]
+                step = self.state.return_to_floor_step
+
+                if step == 0:
                     for button_text, button in buttons:
-                        if contains_any(button_text, markers):
-                            selected = (button_text, button, action_name, None)
+                        if "главное меню" in button_text:
+                            selected = (button_text, button, "Главное меню", None)
                             selected_kind = "return_step"
                             break
-                else:
+
+                elif step == 1:
+                    for button_text, button in buttons:
+                        if "исследовать" in button_text or "исследование" in button_text:
+                            selected = (button_text, button, "Исследовать", None)
+                            selected_kind = "return_step"
+                            break
+
+                elif step == 2:
                     for button_text, button in buttons:
                         if floor_button_matches(button_text, self.state.target_floor):
                             selected = (
@@ -137,10 +142,29 @@ class FarmerEngine:
                                 f"Этаж {self.state.target_floor}",
                                 None,
                             )
-                            selected_kind = "return_floor"
+                            selected_kind = "return_step"
                             break
 
-            # Обычный фарм выполняется только вне служебных маршрутов.
+                elif step == 3:
+                    # Берём именно последнюю кнопку, где есть слово «локация».
+                    # Кнопка «Назад» и любые кнопки без «локация» игнорируются.
+                    location_buttons = [
+                        (button_text, button)
+                        for button_text, button in buttons
+                        if "локац" in button_text and "назад" not in button_text
+                    ]
+                    if location_buttons:
+                        button_text, button = location_buttons[-1]
+                        selected = (button_text, button, "Последняя локация", None)
+                        selected_kind = "return_step"
+
+                elif step == 4:
+                    for button_text, button in buttons:
+                        if "начать исследование" in button_text:
+                            selected = (button_text, button, "Начать исследование", None)
+                            selected_kind = "return_finish"
+                            break
+
             if (
                 selected is None
                 and not self.state.repair_mode
@@ -202,10 +226,10 @@ class FarmerEngine:
             elif selected_kind == "return_step":
                 self.state.return_to_floor_step += 1
 
-            elif selected_kind == "return_floor":
+            elif selected_kind == "return_finish":
                 self.state.return_to_floor_mode = False
                 self.state.return_to_floor_step = 0
-                logger.info("Returned to floor %s", self.state.target_floor)
+                logger.info("Exploration started on floor %s", self.state.target_floor)
 
             logger.info("Clicked: %s (message=%s)", action_name, message.id)
             return True
