@@ -22,9 +22,9 @@ HELP_TEXT = """Команды управления:
 /help — показать команды
 
 Автоматические маршруты по московскому времени:
-:35 — /start → Кланы → Гильдейский зачёт → Боевая доблесть → Выбрать цель → Agrognomiki → Подтвердить атаку до 0 атак.
+:52 — /start → Кланы → Гильдейский зачёт → Боевая доблесть → Выбрать цель → Agrognomiki → бои до 0 атак.
 После гильдии обычный фарм НЕ запускается.
-:37 — /start → Арена (PvP) → Рандомный бой 5 раз → обычный фарм.
+:55 — /start → Арена (PvP) → Рандомный бой 5 раз → обычный фарм.
 
 Команды отправляйте сюда, в «Избранное».
 """
@@ -144,6 +144,19 @@ async def run() -> None:
                 return True
         return False
 
+    async def click_combat_action(message) -> bool:
+        """Во время гильдейской атаки добивает бой и затем идёт к следующей атаке."""
+        priorities = (
+            ("скрытая атака",),
+            ("удар 2 рук",),
+            ("обычная атака",),
+        )
+        for markers in priorities:
+            if await click_matching(message, markers):
+                logger.info("Guild combat action selected: %s", markers[0])
+                return True
+        return False
+
     async def start_guild_route(hour_key: str) -> None:
         state.scheduled_last_guild_hour = hour_key
         state.scheduled_mode = True
@@ -154,7 +167,7 @@ async def run() -> None:
         state.repair_mode = False
         state.return_to_floor_mode = False
         state.last_signature = None
-        logger.info("Starting guild route at :35 MSK")
+        logger.info("Starting guild route at :52 MSK")
         await client.send_message(game_bot, "/start")
 
     async def start_arena_route(hour_key: str) -> None:
@@ -166,7 +179,7 @@ async def run() -> None:
         state.repair_mode = False
         state.return_to_floor_mode = False
         state.last_signature = None
-        logger.info("Starting arena route at :37 MSK")
+        logger.info("Starting arena route at :55 MSK")
         await client.send_message(game_bot, "/start")
 
     async def finish_arena_route() -> None:
@@ -190,7 +203,7 @@ async def run() -> None:
             texts = [text for text, _, _ in buttons]
             message_text = normalize(message.raw_text)
 
-            # Между завершением гильдии и :37 ничего не нажимаем.
+            # Между гильдией и :55 обычный фарм полностью остановлен.
             if state.scheduled_phase == "wait_arena":
                 return True
 
@@ -229,23 +242,37 @@ async def run() -> None:
                         or ("0 атак" in message_text and "остал" in message_text)
                     )
                     if zero_attacks:
-                        logger.info("Guild attacks exhausted; waiting for :37 MSK")
+                        logger.info("Guild attacks exhausted; waiting for :55 MSK")
                         state.scheduled_phase = "wait_arena"
                         state.scheduled_step = 0
                         state.last_signature = None
                         now_moscow = datetime.now(MOSCOW_TZ)
-                        if now_moscow.minute >= 37:
+                        if now_moscow.minute >= 55:
                             await start_arena_route(now_moscow.strftime("%Y-%m-%d-%H"))
                         return True
 
+                    # Сначала подтверждаем новую атаку.
                     if await click_matching(message, ("подтвердить атаку",)):
                         state.scheduled_confirm_clicks += 1
                         state.last_signature = None
                         return True
 
+                    # После подтверждения открывается бой с боссом. Добиваем его,
+                    # затем на следующем экране снова ищем «Подтвердить атаку».
+                    if await click_combat_action(message):
+                        state.last_signature = None
+                        return True
+
+                    # Иногда после победы есть промежуточная кнопка продолжения.
+                    for marker in ("продолжить", "вернуться"):
+                        if await click_matching(message, (marker,)):
+                            state.last_signature = None
+                            return True
+
                     logger.info(
-                        "Waiting for Confirm attack or explicit 0 attacks; buttons=%s",
+                        "Waiting for guild attack/combat/0 attacks; buttons=%s text=%s",
                         texts,
+                        message_text,
                     )
                     return True
 
@@ -311,7 +338,7 @@ async def run() -> None:
 
                 if (
                     state.enabled
-                    and now_moscow.minute == 35
+                    and now_moscow.minute == 52
                     and state.scheduled_last_guild_hour != hour_key
                     and not state.scheduled_mode
                 ):
@@ -319,14 +346,12 @@ async def run() -> None:
 
                 if (
                     state.enabled
-                    and now_moscow.minute >= 37
+                    and now_moscow.minute >= 55
                     and state.scheduled_last_arena_hour != hour_key
                     and state.scheduled_phase == "wait_arena"
                 ):
                     await start_arena_route(hour_key)
 
-                # Если сервис запустился после :37 и гильдейский маршрут в этом часу
-                # не выполнялся, арену самостоятельно не начинаем.
                 if state.scheduled_mode and state.scheduled_phase != "wait_arena":
                     await process_latest(force=True)
 
