@@ -13,16 +13,16 @@ ENGINE_PATH = ROOT / "engine.py"
 def patch_main() -> None:
     source = MAIN_PATH.read_text(encoding="utf-8")
 
-    # Каноническое расписание по московскому времени.
-    # Гильдейский зачёт запускается каждый час в :50.
+    # Каноническое расписание по московскому времени:
+    # :50 — гильдейский зачёт, :57 — арена.
     source = source.replace(":07 —", ":50 —")
-    source = source.replace(":10 —", ":35 —")
+    source = source.replace(":10 —", ":57 —")
     source = source.replace("at :07 MSK", "at :50 MSK")
-    source = source.replace("at :10 MSK", "at :35 MSK")
-    source = source.replace("и :10 ничего", "и :35 ничего")
-    source = source.replace("waiting for :10 MSK", "waiting for :35 MSK")
+    source = source.replace("at :10 MSK", "at :57 MSK")
+    source = source.replace("и :10 ничего", "и :57 ничего")
+    source = source.replace("waiting for :10 MSK", "waiting for :57 MSK")
     source = source.replace("now_moscow.minute == 7", "now_moscow.minute == 50")
-    source = source.replace("now_moscow.minute >= 10", "now_moscow.minute >= 35")
+    source = source.replace("now_moscow.minute >= 10", "now_moscow.minute >= 57")
 
     # В маршрутах учитываем только буквы, цифры и пробелы — эмодзи игнорируются.
     source = source.replace(
@@ -34,11 +34,6 @@ def patch_main() -> None:
         1,
     )
 
-    # Каноническая логика гильдейского зачёта:
-    # первый бой — «Подтвердить атаку»;
-    # следующие бои — только «Ещё раз: Agrognomiki»;
-    # максимум 10 боёв или до сообщения, что атак осталось 0;
-    # после завершения обязательно отправляется /start.
     guild_replacement = '''                if state.scheduled_step == 6:
                     no_guild_attacks = (
                         "осталось атак в этом часе 0" in message_text
@@ -47,16 +42,19 @@ def patch_main() -> None:
                         or ("0 атак" in message_text and "остал" in message_text)
                         or "нет доступных атак" in message_text
                         or "атаки исчерпаны" in message_text
+                        or "лимит pvp боев исчерпан" in message_text
+                        or "лимит pvp боёв исчерпан" in message_text
+                        or ("лимит" in message_text and "исчерпан" in message_text)
                     )
                     if no_guild_attacks:
-                        logger.info("Guild attacks exhausted; sending /start")
+                        logger.info("Guild attacks exhausted; sending /start and waiting for :57 MSK")
                         state.scheduled_phase = "wait_arena"
                         state.scheduled_step = 0
                         state.last_signature = None
                         await client.send_message(game_bot, "/start")
                         return True
 
-                    # Первый бой запускаем один раз через «Подтвердить атаку».
+                    # Первый бой запускаем через «Подтвердить атаку».
                     if state.scheduled_confirm_clicks == 0:
                         if await click_matching(message, ("подтвердить атаку",)):
                             state.scheduled_confirm_clicks = 1
@@ -64,7 +62,7 @@ def patch_main() -> None:
                             logger.info("Initial guild battle started: 1/10")
                             return True
 
-                    # Внутри каждого боя используем заданный приоритет атак.
+                    # Внутри боя используем заданный приоритет атак.
                     for combat_markers in (
                         ("скрытая атака",),
                         ("удар 2 рук",),
@@ -74,8 +72,8 @@ def patch_main() -> None:
                             state.last_signature = None
                             return True
 
-                    # После победы запускаем следующий бой только кнопкой
-                    # «Ещё раз: Agrognomiki». Ищем по словам без учёта эмодзи.
+                    # После каждого результата нажимаем только
+                    # «Ещё раз: Agrognomiki» и проводим максимум 10 боёв.
                     if state.scheduled_confirm_clicks < 10:
                         repeated = await click_matching(
                             message, ("ещё раз", "agrognomiki")
@@ -94,7 +92,7 @@ def patch_main() -> None:
                             return True
 
                     if state.scheduled_confirm_clicks >= 10:
-                        logger.info("Ten guild battles completed; sending /start")
+                        logger.info("Ten guild battles completed; sending /start and waiting for :57 MSK")
                         state.scheduled_phase = "wait_arena"
                         state.scheduled_step = 0
                         state.last_signature = None
@@ -102,7 +100,7 @@ def patch_main() -> None:
                         return True
 
                     logger.info(
-                        "Waiting for guild combat/repeat/0 attacks; buttons=%s text=%s",
+                        "Waiting for guild combat/repeat/exhaustion; buttons=%s text=%s",
                         texts,
                         message_text,
                     )
@@ -139,22 +137,24 @@ def patch_main() -> None:
                         or "достигли лимита рандомных боёв" in message_text
                         or "лимит 5 боев в час" in message_text
                         or "лимит 5 боёв в час" in message_text
+                        or "лимит pvp боев исчерпан" in message_text
+                        or "лимит pvp боёв исчерпан" in message_text
                     )''',
         1,
     )
 
-    # Арена сохраняет ранее настроенную логику и время :35.
+    # Арена запускается каждый час в :57 независимо от состояния ожидания.
     source = source.replace(
         '''                if (
                     state.enabled
-                    and now_moscow.minute >= 35
+                    and now_moscow.minute >= 57
                     and state.scheduled_last_arena_hour != hour_key
                     and state.scheduled_phase == "wait_arena"
                 ):
                     await start_arena_route(hour_key)''',
         '''                if (
                     state.enabled
-                    and now_moscow.minute >= 35
+                    and now_moscow.minute >= 57
                     and state.scheduled_last_arena_hour != hour_key
                     and state.scheduled_phase != "arena"
                 ):
