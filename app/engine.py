@@ -9,7 +9,14 @@ from collections.abc import Iterable
 from telethon.tl.custom.message import Message
 
 from app.config import Settings
-from app.rules import LOW_RESOURCE_MARKERS, NEVER_CLICK, STAMINA_BUTTON_MARKERS, STANDARD_RULES
+from app.rules import (
+    LOW_RESOURCE_MARKERS,
+    NEVER_CLICK,
+    REPAIR_FLOW,
+    STAMINA_BUTTON_MARKERS,
+    STANDARD_RULES,
+    WORN_EQUIPMENT_MARKERS,
+)
 from app.state import RuntimeState
 
 logger = logging.getLogger(__name__)
@@ -64,27 +71,54 @@ class FarmerEngine:
 
             message_text = normalize(message.raw_text)
             selected: tuple[str, object, str, str | None] | None = None
+            selected_kind: str | None = None
+
+            # Если игра сообщила об износе, включаем отдельный маршрут починки.
+            if contains_any(message_text, WORN_EQUIPMENT_MARKERS):
+                if not self.state.repair_mode:
+                    logger.info("Worn equipment detected; starting repair flow")
+                self.state.repair_mode = True
+                self.state.repair_all_clicks = 0
 
             # Зелье стамины нажимается только при явном предупреждении о ресурсах.
             if contains_any(message_text, LOW_RESOURCE_MARKERS):
                 for button_text, button in buttons:
                     if contains_any(button_text, STAMINA_BUTTON_MARKERS):
                         selected = (button_text, button, "Выпить зелье стамины", "stamina_potions")
+                        selected_kind = "stamina"
                         break
 
-            if selected is None:
+            # Во время починки разрешён только маршрут:
+            # Главное меню -> Локации -> Кузница/починка -> Починить всё -> Починить всё.
+            if selected is None and self.state.repair_mode:
+                for markers, action_name in REPAIR_FLOW:
+                    for button_text, button in buttons:
+                        if contains_any(button_text, markers):
+                            selected = (button_text, button, action_name, None)
+                            selected_kind = "repair_all" if "починить все" in button_text else "repair_step"
+                            break
+                    if selected is not None:
+                        break
+
+            # Обычный фарм выполняется только вне маршрута починки.
+            if selected is None and not self.state.repair_mode:
                 for rule in STANDARD_RULES:
                     for button_text, button in buttons:
                         if contains_any(button_text, NEVER_CLICK):
                             continue
                         if contains_any(button_text, rule.markers):
                             selected = (button_text, button, rule.action_name, rule.counter)
+                            selected_kind = "standard"
                             break
                     if selected is not None:
                         break
 
             if selected is None:
-                logger.info("No matching action. Buttons: %s", [text for text, _ in buttons])
+                logger.info(
+                    "No matching action. repair_mode=%s, buttons=%s",
+                    self.state.repair_mode,
+                    [text for text, _ in buttons],
+                )
                 self.state.last_signature = signature
                 return False
 
@@ -103,6 +137,14 @@ class FarmerEngine:
             self.state.last_action = action_name
             if counter:
                 setattr(self.state, counter, getattr(self.state, counter) + 1)
+
+            if selected_kind == "repair_all":
+                self.state.repair_all_clicks += 1
+                if self.state.repair_all_clicks >= 2:
+                    self.state.repairs += 1
+                    self.state.repair_mode = False
+                    self.state.repair_all_clicks = 0
+                    logger.info("Equipment repair flow completed")
 
             logger.info("Clicked: %s (message=%s)", action_name, message.id)
             return True
