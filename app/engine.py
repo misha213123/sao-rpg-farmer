@@ -109,7 +109,24 @@ class FarmerEngine:
                             selected_kind = "repair_step"
                             break
 
-            # Возврат после /start, выбора этажа или починки:
+            # Если пользователь сам открыл главное меню, продолжаем маршрут к выбранному этажу.
+            # На главном меню есть кнопка «Исследовать»; «Профиль» больше не нажимаем.
+            if (
+                selected is None
+                and not self.state.repair_mode
+                and not self.state.return_to_floor_mode
+                and self.state.target_floor is not None
+                and any("исследовать" in text or "исследование" in text for text, _ in buttons)
+            ):
+                self.state.return_to_floor_mode = True
+                self.state.return_to_floor_step = 1
+                self.state.last_signature = None
+                logger.info(
+                    "Main menu detected; resuming route to floor %s",
+                    self.state.target_floor,
+                )
+
+            # Возврат после /start, выбора этажа, ручного входа в главное меню или починки:
             # Главное меню -> Исследовать -> этаж -> последняя кнопка с «локация» -> Начать исследование.
             if (
                 selected is None
@@ -120,11 +137,22 @@ class FarmerEngine:
                 step = self.state.return_to_floor_step
 
                 if step == 0:
-                    for button_text, button in buttons:
-                        if "главное меню" in button_text:
-                            selected = (button_text, button, "Главное меню", None)
-                            selected_kind = "return_step"
-                            break
+                    # Если уже на главном меню, сразу пропускаем шаг «Главное меню».
+                    investigate_buttons = [
+                        (button_text, button)
+                        for button_text, button in buttons
+                        if "исследовать" in button_text or "исследование" in button_text
+                    ]
+                    if investigate_buttons:
+                        button_text, button = investigate_buttons[0]
+                        selected = (button_text, button, "Исследовать", None)
+                        selected_kind = "return_skip_main"
+                    else:
+                        for button_text, button in buttons:
+                            if "главное меню" in button_text:
+                                selected = (button_text, button, "Главное меню", None)
+                                selected_kind = "return_step"
+                                break
 
                 elif step == 1:
                     for button_text, button in buttons:
@@ -146,8 +174,6 @@ class FarmerEngine:
                             break
 
                 elif step == 3:
-                    # Берём именно последнюю кнопку, где есть слово «локация».
-                    # Кнопка «Назад» и любые кнопки без «локация» игнорируются.
                     location_buttons = [
                         (button_text, button)
                         for button_text, button in buttons
@@ -222,6 +248,9 @@ class FarmerEngine:
                         "Equipment repair completed; returning to floor %s",
                         self.state.target_floor,
                     )
+
+            elif selected_kind == "return_skip_main":
+                self.state.return_to_floor_step = 2
 
             elif selected_kind == "return_step":
                 self.state.return_to_floor_step += 1
