@@ -73,12 +73,12 @@ class FarmerEngine:
             selected: tuple[str, object, str, str | None] | None = None
             selected_kind: str | None = None
 
-            # Если игра сообщила об износе, включаем отдельный маршрут починки.
+            # Если игра сообщила об износе, запускаем маршрут с первого шага.
             if contains_any(message_text, WORN_EQUIPMENT_MARKERS):
                 if not self.state.repair_mode:
                     logger.info("Worn equipment detected; starting repair flow")
                 self.state.repair_mode = True
-                self.state.repair_all_clicks = 0
+                self.state.repair_step = 0
 
             # Зелье стамины нажимается только при явном предупреждении о ресурсах.
             if contains_any(message_text, LOW_RESOURCE_MARKERS):
@@ -88,17 +88,19 @@ class FarmerEngine:
                         selected_kind = "stamina"
                         break
 
-            # Во время починки разрешён только маршрут:
-            # Главное меню -> Локации -> Кузница/починка -> Починить всё -> Починить всё.
+            # Во время починки выполняется строго один текущий шаг:
+            # Главное меню -> Локации -> Кузница -> Починка -> Починить всё -> Починить всё.
             if selected is None and self.state.repair_mode:
-                for markers, action_name in REPAIR_FLOW:
+                if self.state.repair_step >= len(REPAIR_FLOW):
+                    self.state.repair_mode = False
+                    self.state.repair_step = 0
+                else:
+                    markers, action_name = REPAIR_FLOW[self.state.repair_step]
                     for button_text, button in buttons:
                         if contains_any(button_text, markers):
                             selected = (button_text, button, action_name, None)
-                            selected_kind = "repair_all" if "починить все" in button_text else "repair_step"
+                            selected_kind = "repair_step"
                             break
-                    if selected is not None:
-                        break
 
             # Обычный фарм выполняется только вне маршрута починки.
             if selected is None and not self.state.repair_mode:
@@ -115,8 +117,9 @@ class FarmerEngine:
 
             if selected is None:
                 logger.info(
-                    "No matching action. repair_mode=%s, buttons=%s",
+                    "No matching action. repair_mode=%s, repair_step=%s, buttons=%s",
                     self.state.repair_mode,
+                    self.state.repair_step,
                     [text for text, _ in buttons],
                 )
                 self.state.last_signature = signature
@@ -138,12 +141,12 @@ class FarmerEngine:
             if counter:
                 setattr(self.state, counter, getattr(self.state, counter) + 1)
 
-            if selected_kind == "repair_all":
-                self.state.repair_all_clicks += 1
-                if self.state.repair_all_clicks >= 2:
+            if selected_kind == "repair_step":
+                self.state.repair_step += 1
+                if self.state.repair_step >= len(REPAIR_FLOW):
                     self.state.repairs += 1
                     self.state.repair_mode = False
-                    self.state.repair_all_clicks = 0
+                    self.state.repair_step = 0
                     logger.info("Equipment repair flow completed")
 
             logger.info("Clicked: %s (message=%s)", action_name, message.id)
