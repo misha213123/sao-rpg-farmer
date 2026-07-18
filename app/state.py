@@ -20,7 +20,7 @@ class RuntimeState:
     repair_mode: bool = False
     repair_step: int = 0
 
-    # Ежечасный маршрут в :15 по московскому времени.
+    # Ежечасный маршрут в :25 по московскому времени.
     scheduled_mode: bool = False
     scheduled_step: int = 0
     scheduled_last_hour: str | None = None
@@ -61,7 +61,7 @@ class RuntimeState:
             f"Починок: {self.repairs}\n"
             f"Режим починки: {repair_status}\n"
             f"Возврат на этаж: {return_status}\n"
-            f"Маршрут :15 МСК: {scheduled_status}\n"
+            f"Маршрут :25 МСК: {scheduled_status}\n"
             f"Запусков маршрута: {self.scheduled_runs}\n"
             f"Последнее действие: {self.last_action}"
         )
