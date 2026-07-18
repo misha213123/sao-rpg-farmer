@@ -7,6 +7,10 @@ from datetime import datetime, timezone
 @dataclass(slots=True)
 class RuntimeState:
     enabled: bool = False
+    awaiting_floor: bool = False
+    target_floor: int | None = None
+    return_to_floor_mode: bool = False
+    return_to_floor_step: int = 0
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     clicks: int = 0
     fights: int = 0
@@ -27,9 +31,16 @@ class RuntimeState:
 
     def status_text(self) -> str:
         status = "включён ✅" if self.enabled else "выключен ⛔"
+        floor = str(self.target_floor) if self.target_floor is not None else "не выбран"
         repair_status = f"да, шаг {self.repair_step + 1}" if self.repair_mode else "нет"
+        return_status = (
+            f"да, шаг {self.return_to_floor_step + 1}"
+            if self.return_to_floor_mode
+            else "нет"
+        )
         return (
             f"Статус: {status}\n"
+            f"Этаж: {floor}\n"
             f"Аптайм: {self.uptime_text()}\n"
             f"Нажатий: {self.clicks}\n"
             f"Атак: {self.fights}\n"
@@ -37,5 +48,6 @@ class RuntimeState:
             f"Сокровищ: {self.treasures}\n"
             f"Починок: {self.repairs}\n"
             f"Режим починки: {repair_status}\n"
+            f"Возврат на этаж: {return_status}\n"
             f"Последнее действие: {self.last_action}"
         )
