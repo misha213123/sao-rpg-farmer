@@ -1,0 +1,23 @@
+services:
+  - type: worker
+    name: sao-rpg-farmer
+    runtime: docker
+    plan: starter
+    autoDeploy: true
+    envVars:
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: STRING_SESSION
+        sync: false
+      - key: GAME_BOT
+        sync: false
+      - key: AUTO_START
+        value: "false"
+      - key: CLICK_DELAY_MIN
+        value: "0.7"
+      - key: CLICK_DELAY_MAX
+        value: "1.4"
+      - key: LOG_LEVEL
+        value: INFO
