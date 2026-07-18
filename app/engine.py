@@ -51,10 +51,19 @@ def is_exploration_location(button_text: str) -> bool:
         return False
     if "локация" not in button_text:
         return False
-    # «Локации» — отдельный пункт главного меню, разрешён только при починке.
-    if button_text.startswith("локации"):
+    if button_text.startswith("локации") or " локации" in button_text:
         return False
     return True
+
+
+def is_main_explore_button(button_text: str) -> bool:
+    """Кнопка главного меню «Исследовать», включая эмодзи перед текстом."""
+    return (
+        "исследовать" in button_text
+        and "продолжить" not in button_text
+        and "начать" not in button_text
+        and "исследование" not in button_text
+    )
 
 
 class FarmerEngine:
@@ -103,7 +112,6 @@ class FarmerEngine:
             if not force and signature == self.state.last_signature:
                 return False
 
-            # Профиль, Назад, HP и Сбежать полностью исключены.
             buttons = [
                 item
                 for item in all_buttons
@@ -115,7 +123,6 @@ class FarmerEngine:
             selected: SelectedAction | None = None
             selected_kind: str | None = None
 
-            # Запускаем починку только по сообщению об износе.
             if contains_any(message_text, WORN_EQUIPMENT_MARKERS):
                 if not self.state.repair_mode:
                     logger.info("Worn equipment detected; starting repair flow")
@@ -123,7 +130,6 @@ class FarmerEngine:
                 self.state.repair_step = 0
                 self.state.return_to_floor_mode = False
 
-            # Стамина — только при явном сообщении о нехватке ресурсов.
             if contains_any(message_text, LOW_RESOURCE_MARKERS):
                 for button_text, row, column in buttons:
                     if contains_any(button_text, STAMINA_BUTTON_MARKERS):
@@ -137,8 +143,6 @@ class FarmerEngine:
                         selected_kind = "stamina"
                         break
 
-            # Маршрут починки:
-            # Главное меню -> Локации -> Кузница -> Починка -> Починить всё -> Починить всё.
             if selected is None and self.state.repair_mode:
                 if self.state.repair_step < len(REPAIR_FLOW):
                     markers, action_name = REPAIR_FLOW[self.state.repair_step]
@@ -154,12 +158,9 @@ class FarmerEngine:
                             selected_kind = "repair_step"
                             break
 
-            # Основной маршрут фарма:
-            # Исследовать -> выбранный этаж -> последняя Локация -> Продолжить/Начать.
             if selected is None and not self.state.repair_mode and self.state.target_floor is not None:
-                # Финальная кнопка исследования.
                 for button_text, row, column in buttons:
-                    if button_text.startswith("продолжить исследование"):
+                    if "продолжить исследование" in button_text:
                         selected = (
                             button_text,
                             row,
@@ -172,7 +173,7 @@ class FarmerEngine:
 
                 if selected is None:
                     for button_text, row, column in buttons:
-                        if button_text.startswith("начать исследование"):
+                        if "начать исследование" in button_text:
                             selected = (
                                 button_text,
                                 row,
@@ -183,10 +184,10 @@ class FarmerEngine:
                             selected_kind = "navigation_finish"
                             break
 
-                # Главное меню: сначала и только «Исследовать».
+                # Главное меню: эмодзи перед словом не мешают распознаванию.
                 if selected is None:
                     for button_text, row, column in buttons:
-                        if button_text == "исследовать" or button_text.startswith("исследовать "):
+                        if is_main_explore_button(button_text):
                             selected = (
                                 button_text,
                                 row,
@@ -197,7 +198,6 @@ class FarmerEngine:
                             selected_kind = "navigation"
                             break
 
-                # Экран выбора этажа.
                 if selected is None:
                     for button_text, row, column in buttons:
                         if floor_button_matches(button_text, self.state.target_floor):
@@ -211,8 +211,6 @@ class FarmerEngine:
                             selected_kind = "navigation"
                             break
 
-                # Экран выбора локации внутри этажа.
-                # Пункт главного меню «Локации» сюда никогда не попадает.
                 if selected is None:
                     location_buttons = [
                         item for item in buttons if is_exploration_location(item[0])
@@ -228,10 +226,9 @@ class FarmerEngine:
                         )
                         selected_kind = "navigation"
 
-                # Если сейчас другой экран, возвращаемся в главное меню.
                 if selected is None:
                     for button_text, row, column in buttons:
-                        if button_text == "главное меню" or button_text.startswith("главное меню"):
+                        if "главное меню" in button_text:
                             selected = (
                                 button_text,
                                 row,
@@ -242,7 +239,6 @@ class FarmerEngine:
                             selected_kind = "navigation"
                             break
 
-            # Обычные боевые действия. «Локации» здесь отсутствует в правилах.
             if selected is None and not self.state.repair_mode:
                 for rule in STANDARD_RULES:
                     for button_text, row, column in buttons:
@@ -272,14 +268,12 @@ class FarmerEngine:
 
             button_text, row, column, action_name, counter = selected
 
-            # Последняя страховка от запрещённых кнопок.
             if "профил" in button_text or contains_any(button_text, NEVER_CLICK):
                 logger.error("Blocked forbidden button: %s", button_text)
                 self.state.last_signature = signature
                 return False
 
-            # «Локации» разрешена исключительно во время маршрута починки.
-            if button_text.startswith("локации") and selected_kind != "repair_step":
+            if (button_text.startswith("локации") or " локации" in button_text) and selected_kind != "repair_step":
                 logger.error("Blocked main-menu Locations outside repair: %s", button_text)
                 self.state.last_signature = signature
                 return False
