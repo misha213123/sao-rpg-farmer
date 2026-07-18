@@ -69,8 +69,6 @@ def patch_main() -> None:
                             return True
 
                     # После каждого результата нажимаем кнопку «Ещё раз: ...».
-                    # Название цели может писаться по-разному, поэтому ищем только слова
-                    # «ещё раз», но исключительно внутри гильдейского маршрута.
                     if state.scheduled_confirm_clicks < 10:
                         repeated = await click_matching(message, ("ещё раз",))
                         if not repeated:
@@ -113,8 +111,7 @@ def patch_main() -> None:
     if guild_count != 1:
         raise RuntimeError("Could not patch guild route block in app/main.py")
 
-    # Сообщение «Вы достигли лимита рандомных боев» означает завершение арены.
-    # finish_arena_route отправляет /start и возвращает бота к обычному фарму.
+    # Сообщение о лимите завершает арену и возвращает обычный фарм.
     source = source.replace(
         '''                    arena_exhausted = (
                         ("5/5" in message_text and "бо" in message_text)
@@ -151,6 +148,24 @@ def patch_main() -> None:
                     and state.scheduled_phase != "arena"
                 ):
                     await start_arena_route(hour_key)''',
+    )
+
+    # Надёжный приём команд из «Избранного».
+    # chats="me" у Telethon иногда не срабатывает на сервере, поэтому слушаем
+    # все исходящие сообщения и явно пропускаем только чат пользователя с собой.
+    source = source.replace(
+        '@client.on(events.NewMessage(chats="me", outgoing=True))',
+        '@client.on(events.NewMessage(outgoing=True))',
+        1,
+    )
+    source = source.replace(
+        '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
+        raw = (event.raw_text or "").strip()''',
+        '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
+        if event.chat_id != me.id:
+            return
+        raw = (event.raw_text or "").strip()''',
+        1,
     )
 
     MAIN_PATH.write_text(source, encoding="utf-8")
