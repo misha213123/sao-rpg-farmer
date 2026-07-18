@@ -14,15 +14,15 @@ def patch_main() -> None:
     source = MAIN_PATH.read_text(encoding="utf-8")
 
     # Каноническое расписание по московскому времени:
-    # :08 — гильдейский зачёт, :10 — арена.
-    source = source.replace(":07 —", ":08 —")
-    source = source.replace(":10 —", ":10 —")
-    source = source.replace("at :07 MSK", "at :08 MSK")
-    source = source.replace("at :10 MSK", "at :10 MSK")
-    source = source.replace("и :10 ничего", "и :10 ничего")
-    source = source.replace("waiting for :10 MSK", "waiting for :10 MSK")
-    source = source.replace("now_moscow.minute == 7", "now_moscow.minute == 8")
-    source = source.replace("now_moscow.minute >= 10", "now_moscow.minute >= 10")
+    # :18 — арена, :20 — гильдейский зачёт.
+    source = source.replace(":07 —", ":20 —")
+    source = source.replace(":10 —", ":18 —")
+    source = source.replace("at :07 MSK", "at :20 MSK")
+    source = source.replace("at :10 MSK", "at :18 MSK")
+    source = source.replace("и :10 ничего", "и :18 ничего")
+    source = source.replace("waiting for :10 MSK", "waiting for :18 MSK")
+    source = source.replace("now_moscow.minute == 7", "now_moscow.minute == 20")
+    source = source.replace("now_moscow.minute >= 10", "now_moscow.minute >= 18")
 
     # В маршрутах учитываем только буквы, цифры и пробелы — эмодзи игнорируются.
     source = source.replace(
@@ -47,9 +47,11 @@ def patch_main() -> None:
                         or ("лимит" in message_text and "исчерпан" in message_text)
                     )
                     if no_guild_attacks:
-                        logger.info("Guild attacks exhausted; sending /start and waiting for :10 MSK")
-                        state.scheduled_phase = "wait_arena"
+                        logger.info("Guild attacks exhausted; sending /start and returning to farming")
+                        state.scheduled_mode = False
+                        state.scheduled_phase = ""
                         state.scheduled_step = 0
+                        state.return_to_floor_mode = state.target_floor is not None
                         state.last_signature = None
                         await client.send_message(game_bot, "/start")
                         return True
@@ -92,9 +94,11 @@ def patch_main() -> None:
                             return True
 
                     if state.scheduled_confirm_clicks >= 10:
-                        logger.info("Ten guild battles completed; sending /start and waiting for :10 MSK")
-                        state.scheduled_phase = "wait_arena"
+                        logger.info("Ten guild battles completed; sending /start and returning to farming")
+                        state.scheduled_mode = False
+                        state.scheduled_phase = ""
                         state.scheduled_step = 0
+                        state.return_to_floor_mode = state.target_floor is not None
                         state.last_signature = None
                         await client.send_message(game_bot, "/start")
                         return True
@@ -120,41 +124,83 @@ def patch_main() -> None:
     if guild_count != 1:
         raise RuntimeError("Could not patch guild route block in app/main.py")
 
-    # Сообщение о лимите завершает арену и возвращает обычный фарм.
-    source = source.replace(
-        '''                    arena_exhausted = (
+    # Арена: первый бой запускается через «Рандомный бой», а следующие
+    # исключительно кнопкой «Ещё бой» до 5 боёв или сообщения о лимите.
+    arena_replacement = '''                if state.scheduled_step == 2:
+                    arena_exhausted = (
                         ("5/5" in message_text and "бо" in message_text)
                         or "использовано 5/5" in message_text
-                        or "боёв в час 5/5" in message_text
-                        or "боев в час 5/5" in message_text
-                    )''',
-        '''                    arena_exhausted = (
-                        ("5/5" in message_text and "бо" in message_text)
-                        or "использовано 5/5" in message_text
-                        or "боёв в час 5/5" in message_text
-                        or "боев в час 5/5" in message_text
+                        or "рандомных боев использовано 5/5" in message_text
+                        or "рандомных боёв использовано 5/5" in message_text
                         or "достигли лимита рандомных боев" in message_text
                         or "достигли лимита рандомных боёв" in message_text
                         or "лимит 5 боев в час" in message_text
                         or "лимит 5 боёв в час" in message_text
                         or "лимит pvp боев исчерпан" in message_text
                         or "лимит pvp боёв исчерпан" in message_text
-                    )''',
-        1,
-    )
+                    )
+                    if arena_exhausted:
+                        await finish_arena_route()
+                        return True
 
-    # Арена запускается каждый час в :10 независимо от состояния ожидания.
+                    if state.scheduled_arena_clicks == 0:
+                        if await click_matching(message, ("рандомный бой",)):
+                            state.scheduled_arena_clicks = 1
+                            state.last_signature = None
+                            logger.info("Arena battle started: 1/5")
+                            return True
+
+                    if state.scheduled_arena_clicks < 5:
+                        repeated = await click_matching(message, ("ещё бой",))
+                        if not repeated:
+                            repeated = await click_matching(message, ("еще бой",))
+                        if repeated:
+                            state.scheduled_arena_clicks += 1
+                            state.last_signature = None
+                            logger.info(
+                                "Arena battle started: %s/5",
+                                state.scheduled_arena_clicks,
+                            )
+                            return True
+
+                    if state.scheduled_arena_clicks >= 5:
+                        await finish_arena_route()
+                        return True
+
+                    logger.info(
+                        "Waiting for arena repeat (%s/5); buttons=%s text=%s",
+                        state.scheduled_arena_clicks,
+                        texts,
+                        message_text,
+                    )
+                    return True
+
+'''
+
+    arena_pattern = re.compile(
+        r"                if state\.scheduled_step == 2:\n.*?\n            logger\.warning\(",
+        re.DOTALL,
+    )
+    source, arena_count = arena_pattern.subn(
+        arena_replacement + "            logger.warning(",
+        source,
+        count=1,
+    )
+    if arena_count != 1:
+        raise RuntimeError("Could not patch arena route block in app/main.py")
+
+    # Арена запускается каждый час в :18 независимо от состояния гильдии.
     source = source.replace(
         '''                if (
                     state.enabled
-                    and now_moscow.minute >= 10
+                    and now_moscow.minute >= 18
                     and state.scheduled_last_arena_hour != hour_key
                     and state.scheduled_phase == "wait_arena"
                 ):
                     await start_arena_route(hour_key)''',
         '''                if (
                     state.enabled
-                    and now_moscow.minute >= 10
+                    and now_moscow.minute >= 18
                     and state.scheduled_last_arena_hour != hour_key
                     and state.scheduled_phase != "arena"
                 ):
