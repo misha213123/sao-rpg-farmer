@@ -12,6 +12,7 @@ from app.engine import FarmerEngine
 from app.state import RuntimeState
 
 HELP_TEXT = """Команды управления:
+/start — начать переход на сохранённый этаж
 /on — включить автоматику и выбрать этаж
 /floor 25 — сменить этаж на 25
 /off — выключить автоматику
@@ -57,6 +58,28 @@ async def run() -> None:
             return await engine.process(message, force=force)
         return False
 
+    async def begin_navigation(event: events.NewMessage.Event) -> None:
+        if state.target_floor is None:
+            state.enabled = False
+            state.awaiting_floor = True
+            await event.reply("Сначала выбери этаж. Напиши только номер, например: 25")
+            return
+
+        state.enabled = True
+        state.awaiting_floor = False
+        state.repair_mode = False
+        state.repair_step = 0
+        state.return_to_floor_mode = True
+        state.return_to_floor_step = 0
+        state.last_signature = None
+        await event.reply(
+            f"Запускаю фарм ✅\nЭтаж: {state.target_floor}\n"
+            "Маршрут: Главное меню → Исследовать → этаж → последняя Локация → Начать исследование."
+        )
+        clicked = await process_latest()
+        if not clicked:
+            await event.reply("Жду следующего сообщения игры, чтобы продолжить переход.")
+
     async def activate_floor(floor: int, event: events.NewMessage.Event) -> None:
         state.target_floor = floor
         state.awaiting_floor = False
@@ -68,7 +91,7 @@ async def run() -> None:
         state.last_signature = None
         await event.reply(
             f"Автоматизация включена ✅\nВыбран этаж: {floor}\n"
-            "Перехожу: Главное меню → Исследовать → выбранный этаж."
+            "Перехожу: Главное меню → Исследовать → этаж → последняя Локация → Начать исследование."
         )
         clicked = await process_latest()
         if not clicked:
@@ -98,7 +121,10 @@ async def run() -> None:
         if not command.startswith("/"):
             return
 
-        if command == "/on":
+        if command == "/start":
+            await begin_navigation(event)
+
+        elif command == "/on":
             state.enabled = False
             state.awaiting_floor = True
             state.return_to_floor_mode = False
