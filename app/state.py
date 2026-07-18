@@ -20,10 +20,12 @@ class RuntimeState:
     repair_mode: bool = False
     repair_step: int = 0
 
-    # Ежечасный маршрут в :25 по московскому времени.
+    # Ежечасные маршруты: гильдия в :35, арена в :37 по Москве.
     scheduled_mode: bool = False
+    scheduled_phase: str = ""
     scheduled_step: int = 0
-    scheduled_last_hour: str | None = None
+    scheduled_last_guild_hour: str | None = None
+    scheduled_last_arena_hour: str | None = None
     scheduled_runs: int = 0
     scheduled_confirm_clicks: int = 0
     scheduled_arena_clicks: int = 0
@@ -48,7 +50,7 @@ class RuntimeState:
             else "нет"
         )
         scheduled_status = (
-            f"да, шаг {self.scheduled_step + 1}"
+            f"{self.scheduled_phase or 'активен'}, шаг {self.scheduled_step}"
             if self.scheduled_mode
             else "нет"
         )
@@ -63,9 +65,9 @@ class RuntimeState:
             f"Починок: {self.repairs}\n"
             f"Режим починки: {repair_status}\n"
             f"Возврат на этаж: {return_status}\n"
-            f"Маршрут :25 МСК: {scheduled_status}\n"
+            f"Маршрут :35/:37 МСК: {scheduled_status}\n"
             f"Подтверждений атаки: {self.scheduled_confirm_clicks}\n"
-            f"Рандомных боёв: {self.scheduled_arena_clicks}\n"
-            f"Запусков маршрута: {self.scheduled_runs}\n"
+            f"Рандомных боёв: {self.scheduled_arena_clicks}/5\n"
+            f"Завершённых циклов: {self.scheduled_runs}\n"
             f"Последнее действие: {self.last_action}"
         )
