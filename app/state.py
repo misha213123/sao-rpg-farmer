@@ -14,7 +14,7 @@ class RuntimeState:
     treasures: int = 0
     repairs: int = 0
     repair_mode: bool = False
-    repair_all_clicks: int = 0
+    repair_step: int = 0
     last_action: str = "—"
     last_message_id: int | None = None
     last_signature: str | None = None
@@ -27,7 +27,7 @@ class RuntimeState:
 
     def status_text(self) -> str:
         status = "включён ✅" if self.enabled else "выключен ⛔"
-        repair_status = "да" if self.repair_mode else "нет"
+        repair_status = f"да, шаг {self.repair_step + 1}" if self.repair_mode else "нет"
         return (
             f"Статус: {status}\n"
             f"Аптайм: {self.uptime_text()}\n"
