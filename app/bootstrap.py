@@ -14,14 +14,14 @@ def patch_main() -> None:
     source = MAIN_PATH.read_text(encoding="utf-8")
 
     # Расписание по московскому времени.
-    source = source.replace(":07 —", ":22 —")
-    source = source.replace(":10 —", ":24 —")
-    source = source.replace("at :07 MSK", "at :22 MSK")
-    source = source.replace("at :10 MSK", "at :24 MSK")
-    source = source.replace("и :10 ничего", "и :24 ничего")
-    source = source.replace("waiting for :10 MSK", "waiting for :24 MSK")
-    source = source.replace("now_moscow.minute == 7", "now_moscow.minute == 22")
-    source = source.replace("now_moscow.minute >= 10", "now_moscow.minute >= 24")
+    source = source.replace(":07 —", ":33 —")
+    source = source.replace(":10 —", ":35 —")
+    source = source.replace("at :07 MSK", "at :33 MSK")
+    source = source.replace("at :10 MSK", "at :35 MSK")
+    source = source.replace("и :10 ничего", "и :35 ничего")
+    source = source.replace("waiting for :10 MSK", "waiting for :35 MSK")
+    source = source.replace("now_moscow.minute == 7", "now_moscow.minute == 33")
+    source = source.replace("now_moscow.minute >= 10", "now_moscow.minute >= 35")
 
     # В маршрутах учитываем только буквы, цифры и пробелы — эмодзи игнорируются.
     source = source.replace(
@@ -43,7 +43,7 @@ def patch_main() -> None:
                         or "атаки исчерпаны" in message_text
                     )
                     if no_guild_attacks:
-                        logger.info("Guild attacks unavailable; sending /start and waiting for :24 MSK")
+                        logger.info("Guild attacks unavailable; sending /start and waiting for :35 MSK")
                         state.scheduled_phase = "wait_arena"
                         state.scheduled_step = 0
                         state.last_signature = None
@@ -85,7 +85,7 @@ def patch_main() -> None:
                             return True
 
                     if state.scheduled_confirm_clicks >= 10:
-                        logger.info("Ten guild battles completed; sending /start and waiting for :24 MSK")
+                        logger.info("Ten guild battles completed; sending /start and waiting for :35 MSK")
                         state.scheduled_phase = "wait_arena"
                         state.scheduled_step = 0
                         state.last_signature = None
@@ -113,18 +113,40 @@ def patch_main() -> None:
     if guild_count != 1:
         raise RuntimeError("Could not patch guild route block in app/main.py")
 
-    # Арена остаётся с уже рабочей логикой, меняется только время на :24.
+    # Сообщение «Вы достигли лимита рандомных боев» означает завершение арены.
+    # finish_arena_route отправляет /start и возвращает бота к обычному фарму.
+    source = source.replace(
+        '''                    arena_exhausted = (
+                        ("5/5" in message_text and "бо" in message_text)
+                        or "использовано 5/5" in message_text
+                        or "боёв в час 5/5" in message_text
+                        or "боев в час 5/5" in message_text
+                    )''',
+        '''                    arena_exhausted = (
+                        ("5/5" in message_text and "бо" in message_text)
+                        or "использовано 5/5" in message_text
+                        or "боёв в час 5/5" in message_text
+                        or "боев в час 5/5" in message_text
+                        or "достигли лимита рандомных боев" in message_text
+                        or "достигли лимита рандомных боёв" in message_text
+                        or "лимит 5 боев в час" in message_text
+                        or "лимит 5 боёв в час" in message_text
+                    )''',
+        1,
+    )
+
+    # Арена запускается в :35 независимо от состояния ожидания гильдии.
     source = source.replace(
         '''                if (
                     state.enabled
-                    and now_moscow.minute >= 24
+                    and now_moscow.minute >= 35
                     and state.scheduled_last_arena_hour != hour_key
                     and state.scheduled_phase == "wait_arena"
                 ):
                     await start_arena_route(hour_key)''',
         '''                if (
                     state.enabled
-                    and now_moscow.minute >= 24
+                    and now_moscow.minute >= 35
                     and state.scheduled_last_arena_hour != hour_key
                     and state.scheduled_phase != "arena"
                 ):
