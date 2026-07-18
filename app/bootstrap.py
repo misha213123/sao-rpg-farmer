@@ -56,7 +56,6 @@ def patch_main() -> None:
                         await client.send_message(game_bot, "/start")
                         return True
 
-                    # Первый бой запускаем через «Подтвердить атаку».
                     if state.scheduled_confirm_clicks == 0:
                         if await click_matching(message, ("подтвердить атаку",)):
                             state.scheduled_confirm_clicks = 1
@@ -64,7 +63,6 @@ def patch_main() -> None:
                             logger.info("Initial guild battle started: 1/10")
                             return True
 
-                    # Внутри боя используем заданный приоритет атак.
                     for combat_markers in (
                         ("скрытая атака",),
                         ("удар 2 рук",),
@@ -74,8 +72,6 @@ def patch_main() -> None:
                             state.last_signature = None
                             return True
 
-                    # После каждого результата нажимаем только
-                    # «Ещё раз: Agrognomiki» и проводим максимум 10 боёв.
                     if state.scheduled_confirm_clicks < 10:
                         repeated = await click_matching(
                             message, ("ещё раз", "agrognomiki")
@@ -124,8 +120,6 @@ def patch_main() -> None:
     if guild_count != 1:
         raise RuntimeError("Could not patch guild route block in app/main.py")
 
-    # Арена: первый бой запускается через «Рандомный бой», а следующие
-    # исключительно кнопкой «Ещё бой» до 5 боёв или сообщения о лимите.
     arena_replacement = '''                if state.scheduled_step == 2:
                     arena_exhausted = (
                         ("5/5" in message_text and "бо" in message_text)
@@ -189,7 +183,6 @@ def patch_main() -> None:
     if arena_count != 1:
         raise RuntimeError("Could not patch arena route block in app/main.py")
 
-    # Арена запускается каждый час в :18 независимо от состояния гильдии.
     source = source.replace(
         '''                if (
                     state.enabled
@@ -207,7 +200,6 @@ def patch_main() -> None:
                     await start_arena_route(hour_key)''',
     )
 
-    # Надёжный приём команд из «Избранного».
     source = source.replace(
         '@client.on(events.NewMessage(chats="me", outgoing=True))',
         '@client.on(events.NewMessage(outgoing=True))',
@@ -227,22 +219,10 @@ def patch_main() -> None:
 
 
 def patch_engine() -> None:
-    source = ENGINE_PATH.read_text(encoding="utf-8")
-    old = '''                    self.state.return_to_floor_mode = self.state.target_floor is not None
-                    logger.info(
-                        "Equipment repair completed; returning to floor %s",
-                        self.state.target_floor,
-                    )'''
-    new = '''                    self.state.return_to_floor_mode = self.state.target_floor is not None
-                    await message.respond("/start")
-                    self.state.last_signature = None
-                    logger.info(
-                        "Equipment repair completed; /start sent; returning to floor %s",
-                        self.state.target_floor,
-                    )'''
-    if old in source:
-        source = source.replace(old, new, 1)
-    ENGINE_PATH.write_text(source, encoding="utf-8")
+    # Маршрут починки полностью задан в REPAIR_FLOW:
+    # два нажатия «Починить всё», затем «Главное меню».
+    # /start после починки не отправляем.
+    return
 
 
 patch_engine()
