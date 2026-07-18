@@ -66,6 +66,19 @@ def is_main_explore_button(button_text: str) -> bool:
     )
 
 
+def is_event_message(message_text: str, buttons: list[ButtonInfo]) -> bool:
+    """Определяет случайное событие, которое блокирует продолжение исследования."""
+    event_markers = (
+        "активное событие",
+        "событие:",
+        "откажитесь от него",
+        "выберите действие",
+    )
+    if contains_any(message_text, event_markers):
+        return True
+    return any("отказаться от события" in text for text, _, _ in buttons)
+
+
 class FarmerEngine:
     def __init__(self, settings: Settings, state: RuntimeState) -> None:
         self.settings = settings
@@ -158,6 +171,45 @@ class FarmerEngine:
                             selected_kind = "repair_step"
                             break
 
+            # Случайные события во время исследования.
+            # Сначала выбираем безопасный выход «Отказаться от события», чтобы не тратить золото.
+            # Если такой кнопки нет, нажимаем последнюю доступную кнопку события.
+            if (
+                selected is None
+                and not self.state.repair_mode
+                and is_event_message(message_text, buttons)
+            ):
+                for button_text, row, column in buttons:
+                    if "отказаться от события" in button_text or "отказаться" in button_text:
+                        selected = (
+                            button_text,
+                            row,
+                            column,
+                            "Закрыть событие",
+                            None,
+                        )
+                        selected_kind = "event"
+                        break
+
+                if selected is None:
+                    event_buttons = [
+                        item
+                        for item in buttons
+                        if "главное меню" not in item[0]
+                        and "локации" not in item[0]
+                        and "профил" not in item[0]
+                    ]
+                    if event_buttons:
+                        button_text, row, column = event_buttons[-1]
+                        selected = (
+                            button_text,
+                            row,
+                            column,
+                            "Действие события",
+                            None,
+                        )
+                        selected_kind = "event"
+
             if selected is None and not self.state.repair_mode and self.state.target_floor is not None:
                 for button_text, row, column in buttons:
                     if "продолжить исследование" in button_text:
@@ -184,7 +236,6 @@ class FarmerEngine:
                             selected_kind = "navigation_finish"
                             break
 
-                # Главное меню: эмодзи перед словом не мешают распознаванию.
                 if selected is None:
                     for button_text, row, column in buttons:
                         if is_main_explore_button(button_text):
