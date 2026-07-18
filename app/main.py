@@ -21,8 +21,10 @@ HELP_TEXT = """Команды управления:
 /click — обработать последнее сообщение вручную
 /help — показать команды
 
-Автоматический маршрут каждый час в :25 по Москве:
-Кланы → Гильдейский зачёт → Боевая доблесть → Выбрать цель → Agrognomiki → Подтвердить атаку до 0 атак → /start → Арена (PvP) → Рандомный бой до исчезновения → обычный фарм.
+Автоматические маршруты по московскому времени:
+:35 — /start → Кланы → Гильдейский зачёт → Боевая доблесть → Выбрать цель → Agrognomiki → Подтвердить атаку до 0 атак.
+После гильдии обычный фарм НЕ запускается.
+:37 — /start → Арена (PvP) → Рандомный бой 5 раз → обычный фарм.
 
 Команды отправляйте сюда, в «Избранное».
 """
@@ -132,8 +134,9 @@ async def run() -> None:
                 await asyncio.sleep(1.0)
                 await message.click(i=row, j=column)
                 logger.info(
-                    "Scheduled route clicked: %s (step=%s, row=%s, column=%s)",
+                    "Scheduled route clicked: %s (phase=%s, step=%s, row=%s, column=%s)",
                     text,
+                    state.scheduled_phase,
                     state.scheduled_step,
                     row,
                     column,
@@ -141,9 +144,35 @@ async def run() -> None:
                 return True
         return False
 
-    async def finish_scheduled_route() -> None:
-        logger.info("Scheduled route completed; returning to ordinary farming")
+    async def start_guild_route(hour_key: str) -> None:
+        state.scheduled_last_guild_hour = hour_key
+        state.scheduled_mode = True
+        state.scheduled_phase = "guild"
+        state.scheduled_step = 1
+        state.scheduled_confirm_clicks = 0
+        state.scheduled_arena_clicks = 0
+        state.repair_mode = False
+        state.return_to_floor_mode = False
+        state.last_signature = None
+        logger.info("Starting guild route at :35 MSK")
+        await client.send_message(game_bot, "/start")
+
+    async def start_arena_route(hour_key: str) -> None:
+        state.scheduled_last_arena_hour = hour_key
+        state.scheduled_mode = True
+        state.scheduled_phase = "arena"
+        state.scheduled_step = 1
+        state.scheduled_arena_clicks = 0
+        state.repair_mode = False
+        state.return_to_floor_mode = False
+        state.last_signature = None
+        logger.info("Starting arena route at :37 MSK")
+        await client.send_message(game_bot, "/start")
+
+    async def finish_arena_route() -> None:
+        logger.info("Arena completed; returning to ordinary farming")
         state.scheduled_mode = False
+        state.scheduled_phase = ""
         state.scheduled_step = 0
         state.scheduled_runs += 1
         state.return_to_floor_mode = state.target_floor is not None
@@ -160,85 +189,112 @@ async def run() -> None:
             buttons = message_buttons(message)
             texts = [text for text, _, _ in buttons]
             message_text = normalize(message.raw_text)
-            step = state.scheduled_step
 
-            route_steps: dict[int, tuple[str, ...]] = {
-                1: ("кланы",),
-                2: ("гильдейский зачёт",),
-                3: ("боевая доблесть",),
-                4: ("выбрать цель",),
-                5: ("agrognomiki",),
-                7: ("арена", "pvp"),
-            }
+            # Между завершением гильдии и :37 ничего не нажимаем.
+            if state.scheduled_phase == "wait_arena":
+                return True
 
-            if step in route_steps:
-                if await click_matching(message, route_steps[step]):
-                    state.scheduled_step += 1
-                    state.last_signature = None
+            if state.scheduled_phase == "guild":
+                route_steps: dict[int, tuple[str, ...]] = {
+                    1: ("кланы",),
+                    2: ("гильдейский зачёт",),
+                    3: ("боевая доблесть",),
+                    4: ("выбрать цель",),
+                    5: ("agrognomiki",),
+                }
+
+                if state.scheduled_step in route_steps:
+                    if await click_matching(message, route_steps[state.scheduled_step]):
+                        state.scheduled_step += 1
+                        state.last_signature = None
+                        return True
+
+                    if state.scheduled_step == 1:
+                        for text, row, column in buttons:
+                            if "главное меню" in text:
+                                await asyncio.sleep(1.0)
+                                await message.click(i=row, j=column)
+                                return True
+                    logger.info(
+                        "Guild route waiting for step %s; buttons=%s",
+                        state.scheduled_step,
+                        texts,
+                    )
                     return True
 
-                if step in (1, 7):
+                if state.scheduled_step == 6:
+                    zero_attacks = (
+                        "осталось в этом часе 0 атак" in message_text
+                        or "осталось 0 атак" in message_text
+                        or ("0 атак" in message_text and "остал" in message_text)
+                    )
+                    if zero_attacks:
+                        logger.info("Guild attacks exhausted; waiting for :37 MSK")
+                        state.scheduled_phase = "wait_arena"
+                        state.scheduled_step = 0
+                        state.last_signature = None
+                        now_moscow = datetime.now(MOSCOW_TZ)
+                        if now_moscow.minute >= 37:
+                            await start_arena_route(now_moscow.strftime("%Y-%m-%d-%H"))
+                        return True
+
+                    if await click_matching(message, ("подтвердить атаку",)):
+                        state.scheduled_confirm_clicks += 1
+                        state.last_signature = None
+                        return True
+
+                    logger.info(
+                        "Waiting for Confirm attack or explicit 0 attacks; buttons=%s",
+                        texts,
+                    )
+                    return True
+
+            if state.scheduled_phase == "arena":
+                if state.scheduled_step == 1:
+                    if await click_matching(message, ("арена", "pvp")):
+                        state.scheduled_step = 2
+                        state.last_signature = None
+                        return True
                     for text, row, column in buttons:
                         if "главное меню" in text:
                             await asyncio.sleep(1.0)
                             await message.click(i=row, j=column)
-                            logger.info("Scheduled route returning to main menu")
                             return True
-
-                logger.info(
-                    "Scheduled route waiting for step %s; buttons=%s", step, texts
-                )
-                return True
-
-            # Подтверждаем все атаки. Завершаем только когда явно написано 0 атак
-            # либо после минимум одного клика кнопка действительно исчезла.
-            if step == 6:
-                zero_attacks = (
-                    "осталось в этом часе 0 атак" in message_text
-                    or "осталось 0 атак" in message_text
-                    or "0 атак" in message_text and "остал" in message_text
-                )
-                if zero_attacks:
-                    logger.info("Guild attacks exhausted: %s", message_text)
-                    state.scheduled_step = 7
-                    state.last_signature = None
-                    await client.send_message(game_bot, "/start")
+                    logger.info("Arena route waiting for Arena (PvP); buttons=%s", texts)
                     return True
 
-                if await click_matching(message, ("подтвердить атаку",)):
-                    state.scheduled_confirm_clicks += 1
-                    state.last_signature = None
+                if state.scheduled_step == 2:
+                    arena_exhausted = (
+                        ("5/5" in message_text and "бо" in message_text)
+                        or "использовано 5/5" in message_text
+                        or "боёв в час 5/5" in message_text
+                        or "боев в час 5/5" in message_text
+                    )
+                    if arena_exhausted or state.scheduled_arena_clicks >= 5:
+                        await finish_arena_route()
+                        return True
+
+                    if await click_matching(message, ("рандомный бой",)):
+                        state.scheduled_arena_clicks += 1
+                        state.last_signature = None
+                        if state.scheduled_arena_clicks >= 5:
+                            await asyncio.sleep(1.0)
+                            await finish_arena_route()
+                        return True
+
+                    logger.info(
+                        "Waiting for Random battle (%s/5); buttons=%s",
+                        state.scheduled_arena_clicks,
+                        texts,
+                    )
                     return True
 
-                if state.scheduled_confirm_clicks > 0:
-                    logger.info("Confirm attack disappeared; sending /start for Arena")
-                    state.scheduled_step = 7
-                    state.last_signature = None
-                    await client.send_message(game_bot, "/start")
-                    return True
-
-                logger.info("Waiting for Confirm attack button; buttons=%s", texts)
-                return True
-
-            # Жмём Рандомный бой снова и снова. Завершаем только после того,
-            # как хотя бы один бой был запущен и кнопка исчезла.
-            if step == 8:
-                if await click_matching(message, ("рандомный бой",)):
-                    state.scheduled_arena_clicks += 1
-                    state.last_signature = None
-                    return True
-
-                if state.scheduled_arena_clicks > 0:
-                    await finish_scheduled_route()
-                    return True
-
-                logger.info("Waiting for Random battle button; buttons=%s", texts)
-                return True
-
-            logger.warning("Unknown scheduled route step: %s", step)
-            state.scheduled_mode = False
-            state.scheduled_step = 0
-            return False
+            logger.warning(
+                "Unknown scheduled phase=%s step=%s",
+                state.scheduled_phase,
+                state.scheduled_step,
+            )
+            return True
 
     async def process_latest(force: bool = False) -> bool:
         async for message in client.iter_messages(game_bot, limit=1):
@@ -255,27 +311,23 @@ async def run() -> None:
 
                 if (
                     state.enabled
+                    and now_moscow.minute == 35
+                    and state.scheduled_last_guild_hour != hour_key
                     and not state.scheduled_mode
-                    and now_moscow.minute == 25
-                    and state.scheduled_last_hour != hour_key
                 ):
-                    state.scheduled_last_hour = hour_key
-                    state.scheduled_mode = True
-                    state.scheduled_step = 1
-                    state.scheduled_confirm_clicks = 0
-                    state.scheduled_arena_clicks = 0
-                    state.repair_mode = False
-                    state.return_to_floor_mode = False
-                    state.last_signature = None
-                    logger.info(
-                        "Starting scheduled guild/arena route at %s MSK",
-                        now_moscow.strftime("%H:%M:%S"),
-                    )
-                    await client.send_message(game_bot, "/start")
+                    await start_guild_route(hour_key)
 
-                # Дополнительный опрос нужен, потому что игра не всегда присылает
-                # новое сообщение после каждого повторного клика.
-                if state.scheduled_mode:
+                if (
+                    state.enabled
+                    and now_moscow.minute >= 37
+                    and state.scheduled_last_arena_hour != hour_key
+                    and state.scheduled_phase == "wait_arena"
+                ):
+                    await start_arena_route(hour_key)
+
+                # Если сервис запустился после :37 и гильдейский маршрут в этом часу
+                # не выполнялся, арену самостоятельно не начинаем.
+                if state.scheduled_mode and state.scheduled_phase != "wait_arena":
                     await process_latest(force=True)
 
             except Exception:
@@ -295,6 +347,7 @@ async def run() -> None:
         state.repair_mode = False
         state.repair_step = 0
         state.scheduled_mode = False
+        state.scheduled_phase = ""
         state.scheduled_step = 0
         state.return_to_floor_mode = True
         state.return_to_floor_step = 0
@@ -313,6 +366,7 @@ async def run() -> None:
         state.repair_mode = False
         state.repair_step = 0
         state.scheduled_mode = False
+        state.scheduled_phase = ""
         state.scheduled_step = 0
         state.return_to_floor_mode = True
         state.return_to_floor_step = 0
@@ -359,6 +413,7 @@ async def run() -> None:
             state.awaiting_floor = True
             state.return_to_floor_mode = False
             state.scheduled_mode = False
+            state.scheduled_phase = ""
             await event.reply(
                 "На каком этаже фармить?\nНапиши только номер, например: 25"
             )
@@ -377,6 +432,7 @@ async def run() -> None:
             state.repair_mode = False
             state.return_to_floor_mode = False
             state.scheduled_mode = False
+            state.scheduled_phase = ""
             state.scheduled_step = 0
             await event.reply("Автоматизация выключена ⛔")
         elif command == "/status":
