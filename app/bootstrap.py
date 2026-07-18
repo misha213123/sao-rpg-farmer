@@ -13,14 +13,15 @@ ENGINE_PATH = ROOT / "engine.py"
 def patch_main() -> None:
     source = MAIN_PATH.read_text(encoding="utf-8")
 
-    # Расписание по московскому времени.
-    source = source.replace(":07 —", ":33 —")
+    # Каноническое расписание по московскому времени.
+    # Гильдейский зачёт запускается каждый час в :50.
+    source = source.replace(":07 —", ":50 —")
     source = source.replace(":10 —", ":35 —")
-    source = source.replace("at :07 MSK", "at :33 MSK")
+    source = source.replace("at :07 MSK", "at :50 MSK")
     source = source.replace("at :10 MSK", "at :35 MSK")
     source = source.replace("и :10 ничего", "и :35 ничего")
     source = source.replace("waiting for :10 MSK", "waiting for :35 MSK")
-    source = source.replace("now_moscow.minute == 7", "now_moscow.minute == 33")
+    source = source.replace("now_moscow.minute == 7", "now_moscow.minute == 50")
     source = source.replace("now_moscow.minute >= 10", "now_moscow.minute >= 35")
 
     # В маршрутах учитываем только буквы, цифры и пробелы — эмодзи игнорируются.
@@ -33,6 +34,11 @@ def patch_main() -> None:
         1,
     )
 
+    # Каноническая логика гильдейского зачёта:
+    # первый бой — «Подтвердить атаку»;
+    # следующие бои — только «Ещё раз: Agrognomiki»;
+    # максимум 10 боёв или до сообщения, что атак осталось 0;
+    # после завершения обязательно отправляется /start.
     guild_replacement = '''                if state.scheduled_step == 6:
                     no_guild_attacks = (
                         "осталось атак в этом часе 0" in message_text
@@ -43,14 +49,14 @@ def patch_main() -> None:
                         or "атаки исчерпаны" in message_text
                     )
                     if no_guild_attacks:
-                        logger.info("Guild attacks unavailable; sending /start and waiting for :35 MSK")
+                        logger.info("Guild attacks exhausted; sending /start")
                         state.scheduled_phase = "wait_arena"
                         state.scheduled_step = 0
                         state.last_signature = None
                         await client.send_message(game_bot, "/start")
                         return True
 
-                    # Первый бой запускаем через «Подтвердить атаку».
+                    # Первый бой запускаем один раз через «Подтвердить атаку».
                     if state.scheduled_confirm_clicks == 0:
                         if await click_matching(message, ("подтвердить атаку",)):
                             state.scheduled_confirm_clicks = 1
@@ -58,7 +64,7 @@ def patch_main() -> None:
                             logger.info("Initial guild battle started: 1/10")
                             return True
 
-                    # Внутри боя используем заданный приоритет атак.
+                    # Внутри каждого боя используем заданный приоритет атак.
                     for combat_markers in (
                         ("скрытая атака",),
                         ("удар 2 рук",),
@@ -68,11 +74,16 @@ def patch_main() -> None:
                             state.last_signature = None
                             return True
 
-                    # После каждого результата нажимаем кнопку «Ещё раз: ...».
+                    # После победы запускаем следующий бой только кнопкой
+                    # «Ещё раз: Agrognomiki». Ищем по словам без учёта эмодзи.
                     if state.scheduled_confirm_clicks < 10:
-                        repeated = await click_matching(message, ("ещё раз",))
+                        repeated = await click_matching(
+                            message, ("ещё раз", "agrognomiki")
+                        )
                         if not repeated:
-                            repeated = await click_matching(message, ("еще раз",))
+                            repeated = await click_matching(
+                                message, ("еще раз", "agrognomiki")
+                            )
                         if repeated:
                             state.scheduled_confirm_clicks += 1
                             state.last_signature = None
@@ -83,7 +94,7 @@ def patch_main() -> None:
                             return True
 
                     if state.scheduled_confirm_clicks >= 10:
-                        logger.info("Ten guild battles completed; sending /start and waiting for :35 MSK")
+                        logger.info("Ten guild battles completed; sending /start")
                         state.scheduled_phase = "wait_arena"
                         state.scheduled_step = 0
                         state.last_signature = None
@@ -132,7 +143,7 @@ def patch_main() -> None:
         1,
     )
 
-    # Арена запускается в :35 независимо от состояния ожидания гильдии.
+    # Арена сохраняет ранее настроенную логику и время :35.
     source = source.replace(
         '''                if (
                     state.enabled
@@ -151,8 +162,6 @@ def patch_main() -> None:
     )
 
     # Надёжный приём команд из «Избранного».
-    # chats="me" у Telethon иногда не срабатывает на сервере, поэтому слушаем
-    # все исходящие сообщения и явно пропускаем только чат пользователя с собой.
     source = source.replace(
         '@client.on(events.NewMessage(chats="me", outgoing=True))',
         '@client.on(events.NewMessage(outgoing=True))',
