@@ -209,7 +209,8 @@ def patch_main() -> None:
         '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
         raw = (event.raw_text or "").strip()''',
         '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
-        if event.chat_id != me.id:
+        chat = await event.get_chat()
+        if getattr(chat, "id", None) != me.id:
             return
         raw = (event.raw_text or "").strip()''',
         1,
