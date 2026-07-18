@@ -72,14 +72,22 @@ class FarmerEngine:
             return False
 
         async with self._lock:
-            buttons = self._buttons(message)
-            if not buttons:
+            all_buttons = self._buttons(message)
+            if not all_buttons:
                 logger.debug("Message %s has no buttons", message.id)
                 return False
 
-            signature = self._signature(message, buttons)
+            signature = self._signature(message, all_buttons)
             if not force and signature == self.state.last_signature:
                 return False
+
+            # Запрещённые кнопки полностью исключаются ещё до выбора действия.
+            # Поэтому «Профиль» физически не может быть нажат движком.
+            buttons = [
+                (text, button)
+                for text, button in all_buttons
+                if not contains_any(text, NEVER_CLICK)
+            ]
 
             message_text = normalize(message.raw_text)
             selected: tuple[str, object, str, str | None] | None = None
@@ -91,9 +99,8 @@ class FarmerEngine:
                 self.state.repair_mode = True
                 self.state.repair_step = 0
                 self.state.return_to_floor_mode = False
-                self.state.return_to_floor_step = 0
 
-            # Стамина имеет самый высокий приоритет и используется только при предупреждении.
+            # 1. Стамина — только при сообщении о нехватке ресурсов.
             if contains_any(message_text, LOW_RESOURCE_MARKERS):
                 for button_text, button in buttons:
                     if contains_any(button_text, STAMINA_BUTTON_MARKERS):
@@ -101,7 +108,7 @@ class FarmerEngine:
                         selected_kind = "stamina"
                         break
 
-            # Строгий маршрут починки.
+            # 2. Строгий маршрут починки.
             if selected is None and self.state.repair_mode:
                 if self.state.repair_step < len(REPAIR_FLOW):
                     markers, action_name = REPAIR_FLOW[self.state.repair_step]
@@ -111,44 +118,35 @@ class FarmerEngine:
                             selected_kind = "repair_step"
                             break
 
-            # Если пользователь сам открыл главное меню, запускаем возврат на сохранённый этаж.
-            if (
-                selected is None
-                and not self.state.repair_mode
-                and self.state.target_floor is not None
-                and any("исследовать" in text or "исследование" in text for text, _ in buttons)
-            ):
-                self.state.return_to_floor_mode = True
-                self.state.last_signature = None
-
-            # Самовосстанавливающаяся навигация. Мы определяем текущий экран по кнопкам,
-            # поэтому маршрут не ломается, даже если пользователь вручную перешёл на другой экран.
-            if (
-                selected is None
-                and not self.state.repair_mode
-                and self.state.return_to_floor_mode
-                and self.state.target_floor is not None
-            ):
-                # После выбора локации игра может показать как «Начать», так и
-                # «Продолжить исследование». Оба варианта завершают навигацию.
+            # 3. Навигация к сохранённому этажу всегда имеет приоритет над обычными правилами.
+            # Логика строго такая:
+            # Исследовать -> выбранный этаж -> последняя Локация -> Продолжить/Начать исследование.
+            if selected is None and not self.state.repair_mode and self.state.target_floor is not None:
+                # Уже на экране запуска исследования.
                 for button_text, button in buttons:
-                    if "начать исследование" in button_text or "продолжить исследование" in button_text:
-                        action = "Продолжить исследование" if "продолжить" in button_text else "Начать исследование"
-                        selected = (button_text, button, action, None)
-                        selected_kind = "return_finish"
+                    if "продолжить исследование" in button_text:
+                        selected = (button_text, button, "Продолжить исследование", None)
+                        selected_kind = "navigation_finish"
                         break
 
-                # Экран выбора локации: выбираем последнюю кнопку с «локац», игнорируя «Назад».
+                if selected is None:
+                    for button_text, button in buttons:
+                        if "начать исследование" in button_text:
+                            selected = (button_text, button, "Начать исследование", None)
+                            selected_kind = "navigation_finish"
+                            break
+
+                # Экран выбора локации — выбираем последнюю подходящую кнопку.
                 if selected is None:
                     location_buttons = [
                         (button_text, button)
                         for button_text, button in buttons
-                        if "локац" in button_text and "назад" not in button_text
+                        if "локац" in button_text
                     ]
                     if location_buttons:
                         button_text, button = location_buttons[-1]
                         selected = (button_text, button, "Последняя локация", None)
-                        selected_kind = "return_step"
+                        selected_kind = "navigation"
 
                 # Экран выбора этажа.
                 if selected is None:
@@ -160,35 +158,29 @@ class FarmerEngine:
                                 f"Этаж {self.state.target_floor}",
                                 None,
                             )
-                            selected_kind = "return_step"
+                            selected_kind = "navigation"
                             break
 
-                # Главное меню: нажимаем «Исследовать».
+                # Главное меню — только «Исследовать». «Профиль» уже удалён из buttons.
                 if selected is None:
                     for button_text, button in buttons:
                         if "исследовать" in button_text or "исследование" in button_text:
                             selected = (button_text, button, "Исследовать", None)
-                            selected_kind = "return_step"
+                            selected_kind = "navigation"
                             break
 
-                # Если мы на другом экране, сначала возвращаемся в главное меню.
+                # Если находимся вне главного меню, сначала нажимаем «Главное меню».
                 if selected is None:
                     for button_text, button in buttons:
                         if "главное меню" in button_text:
                             selected = (button_text, button, "Главное меню", None)
-                            selected_kind = "return_step"
+                            selected_kind = "navigation"
                             break
 
-            # Обычный фарм.
-            if (
-                selected is None
-                and not self.state.repair_mode
-                and not self.state.return_to_floor_mode
-            ):
+            # 4. Обычный фарм, когда навигационная кнопка на текущем экране не найдена.
+            if selected is None and not self.state.repair_mode:
                 for rule in STANDARD_RULES:
                     for button_text, button in buttons:
-                        if contains_any(button_text, NEVER_CLICK):
-                            continue
                         if contains_any(button_text, rule.markers):
                             selected = (button_text, button, rule.action_name, rule.counter)
                             selected_kind = "standard"
@@ -198,17 +190,23 @@ class FarmerEngine:
 
             if selected is None:
                 logger.info(
-                    "No matching action. repair_mode=%s, repair_step=%s, return_mode=%s, floor=%s, buttons=%s",
+                    "No matching action. repair_mode=%s, repair_step=%s, floor=%s, buttons=%s",
                     self.state.repair_mode,
                     self.state.repair_step,
-                    self.state.return_to_floor_mode,
                     self.state.target_floor,
-                    [text for text, _ in buttons],
+                    [text for text, _ in all_buttons],
                 )
                 self.state.last_signature = signature
                 return False
 
             button_text, button, action_name, counter = selected
+
+            # Последняя страховка: запрещённую кнопку не нажимаем даже при ошибке логики.
+            if contains_any(button_text, NEVER_CLICK):
+                logger.error("Blocked forbidden button: %s", button_text)
+                self.state.last_signature = signature
+                return False
+
             delay = random.uniform(self.settings.click_delay_min, self.settings.click_delay_max)
             await asyncio.sleep(delay)
 
@@ -231,16 +229,15 @@ class FarmerEngine:
                     self.state.repair_mode = False
                     self.state.repair_step = 0
                     self.state.return_to_floor_mode = self.state.target_floor is not None
-                    self.state.return_to_floor_step = 0
                     logger.info(
                         "Equipment repair completed; returning to floor %s",
                         self.state.target_floor,
                     )
 
-            elif selected_kind == "return_finish":
+            elif selected_kind == "navigation_finish":
                 self.state.return_to_floor_mode = False
                 self.state.return_to_floor_step = 0
                 logger.info("Exploration started or continued on floor %s", self.state.target_floor)
 
-            logger.info("Clicked: %s (message=%s)", action_name, message.id)
+            logger.info("Clicked: %s (button=%s, message=%s)", action_name, button_text, message.id)
             return True
