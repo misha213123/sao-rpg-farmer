@@ -14,15 +14,15 @@ def patch_main() -> None:
     source = MAIN_PATH.read_text(encoding="utf-8")
 
     # Каноническое расписание по московскому времени:
-    # :18 — арена, :20 — гильдейский зачёт.
-    source = source.replace(":07 —", ":20 —")
-    source = source.replace(":10 —", ":18 —")
-    source = source.replace("at :07 MSK", "at :20 MSK")
-    source = source.replace("at :10 MSK", "at :18 MSK")
-    source = source.replace("и :10 ничего", "и :18 ничего")
-    source = source.replace("waiting for :10 MSK", "waiting for :18 MSK")
-    source = source.replace("now_moscow.minute == 7", "now_moscow.minute == 20")
-    source = source.replace("now_moscow.minute >= 10", "now_moscow.minute >= 18")
+    # :02 — арена, :04 — гильдейский зачёт.
+    source = source.replace(":07 —", ":04 —")
+    source = source.replace(":10 —", ":02 —")
+    source = source.replace("at :07 MSK", "at :04 MSK")
+    source = source.replace("at :10 MSK", "at :02 MSK")
+    source = source.replace("и :10 ничего", "и :02 ничего")
+    source = source.replace("waiting for :10 MSK", "waiting for :02 MSK")
+    source = source.replace("now_moscow.minute == 7", "now_moscow.minute == 4")
+    source = source.replace("now_moscow.minute >= 10", "now_moscow.minute >= 2")
 
     # В маршрутах учитываем только буквы, цифры и пробелы — эмодзи игнорируются.
     source = source.replace(
@@ -186,14 +186,14 @@ def patch_main() -> None:
     source = source.replace(
         '''                if (
                     state.enabled
-                    and now_moscow.minute >= 18
+                    and now_moscow.minute >= 2
                     and state.scheduled_last_arena_hour != hour_key
                     and state.scheduled_phase == "wait_arena"
                 ):
                     await start_arena_route(hour_key)''',
         '''                if (
                     state.enabled
-                    and now_moscow.minute >= 18
+                    and now_moscow.minute >= 2
                     and state.scheduled_last_arena_hour != hour_key
                     and state.scheduled_phase != "arena"
                 ):
