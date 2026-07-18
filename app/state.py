@@ -19,6 +19,13 @@ class RuntimeState:
     repairs: int = 0
     repair_mode: bool = False
     repair_step: int = 0
+
+    # Ежечасный маршрут в :15 по московскому времени.
+    scheduled_mode: bool = False
+    scheduled_step: int = 0
+    scheduled_last_hour: str | None = None
+    scheduled_runs: int = 0
+
     last_action: str = "—"
     last_message_id: int | None = None
     last_signature: str | None = None
@@ -38,6 +45,11 @@ class RuntimeState:
             if self.return_to_floor_mode
             else "нет"
         )
+        scheduled_status = (
+            f"да, шаг {self.scheduled_step + 1}"
+            if self.scheduled_mode
+            else "нет"
+        )
         return (
             f"Статус: {status}\n"
             f"Этаж: {floor}\n"
@@ -49,5 +61,7 @@ class RuntimeState:
             f"Починок: {self.repairs}\n"
             f"Режим починки: {repair_status}\n"
             f"Возврат на этаж: {return_status}\n"
+            f"Маршрут :15 МСК: {scheduled_status}\n"
+            f"Запусков маршрута: {self.scheduled_runs}\n"
             f"Последнее действие: {self.last_action}"
         )
