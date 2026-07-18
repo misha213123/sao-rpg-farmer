@@ -14,15 +14,15 @@ def patch_main() -> None:
     source = MAIN_PATH.read_text(encoding="utf-8")
 
     # Каноническое расписание по московскому времени:
-    # :50 — гильдейский зачёт, :57 — арена.
-    source = source.replace(":07 —", ":50 —")
-    source = source.replace(":10 —", ":57 —")
-    source = source.replace("at :07 MSK", "at :50 MSK")
-    source = source.replace("at :10 MSK", "at :57 MSK")
-    source = source.replace("и :10 ничего", "и :57 ничего")
-    source = source.replace("waiting for :10 MSK", "waiting for :57 MSK")
-    source = source.replace("now_moscow.minute == 7", "now_moscow.minute == 50")
-    source = source.replace("now_moscow.minute >= 10", "now_moscow.minute >= 57")
+    # :08 — гильдейский зачёт, :10 — арена.
+    source = source.replace(":07 —", ":08 —")
+    source = source.replace(":10 —", ":10 —")
+    source = source.replace("at :07 MSK", "at :08 MSK")
+    source = source.replace("at :10 MSK", "at :10 MSK")
+    source = source.replace("и :10 ничего", "и :10 ничего")
+    source = source.replace("waiting for :10 MSK", "waiting for :10 MSK")
+    source = source.replace("now_moscow.minute == 7", "now_moscow.minute == 8")
+    source = source.replace("now_moscow.minute >= 10", "now_moscow.minute >= 10")
 
     # В маршрутах учитываем только буквы, цифры и пробелы — эмодзи игнорируются.
     source = source.replace(
@@ -47,7 +47,7 @@ def patch_main() -> None:
                         or ("лимит" in message_text and "исчерпан" in message_text)
                     )
                     if no_guild_attacks:
-                        logger.info("Guild attacks exhausted; sending /start and waiting for :57 MSK")
+                        logger.info("Guild attacks exhausted; sending /start and waiting for :10 MSK")
                         state.scheduled_phase = "wait_arena"
                         state.scheduled_step = 0
                         state.last_signature = None
@@ -92,7 +92,7 @@ def patch_main() -> None:
                             return True
 
                     if state.scheduled_confirm_clicks >= 10:
-                        logger.info("Ten guild battles completed; sending /start and waiting for :57 MSK")
+                        logger.info("Ten guild battles completed; sending /start and waiting for :10 MSK")
                         state.scheduled_phase = "wait_arena"
                         state.scheduled_step = 0
                         state.last_signature = None
@@ -143,18 +143,18 @@ def patch_main() -> None:
         1,
     )
 
-    # Арена запускается каждый час в :57 независимо от состояния ожидания.
+    # Арена запускается каждый час в :10 независимо от состояния ожидания.
     source = source.replace(
         '''                if (
                     state.enabled
-                    and now_moscow.minute >= 57
+                    and now_moscow.minute >= 10
                     and state.scheduled_last_arena_hour != hour_key
                     and state.scheduled_phase == "wait_arena"
                 ):
                     await start_arena_route(hour_key)''',
         '''                if (
                     state.enabled
-                    and now_moscow.minute >= 57
+                    and now_moscow.minute >= 10
                     and state.scheduled_last_arena_hour != hour_key
                     and state.scheduled_phase != "arena"
                 ):
