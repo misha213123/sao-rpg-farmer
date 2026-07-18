@@ -93,6 +93,7 @@ class FarmerEngine:
                 self.state.return_to_floor_mode = False
                 self.state.return_to_floor_step = 0
 
+            # Стамина имеет самый высокий приоритет и используется только при предупреждении.
             if contains_any(message_text, LOW_RESOURCE_MARKERS):
                 for button_text, button in buttons:
                     if contains_any(button_text, STAMINA_BUTTON_MARKERS):
@@ -100,6 +101,7 @@ class FarmerEngine:
                         selected_kind = "stamina"
                         break
 
+            # Строгий маршрут починки.
             if selected is None and self.state.repair_mode:
                 if self.state.repair_step < len(REPAIR_FLOW):
                     markers, action_name = REPAIR_FLOW[self.state.repair_step]
@@ -109,59 +111,47 @@ class FarmerEngine:
                             selected_kind = "repair_step"
                             break
 
-            # Если пользователь сам открыл главное меню, продолжаем маршрут к выбранному этажу.
-            # На главном меню есть кнопка «Исследовать»; «Профиль» больше не нажимаем.
+            # Если пользователь сам открыл главное меню, запускаем возврат на сохранённый этаж.
             if (
                 selected is None
                 and not self.state.repair_mode
-                and not self.state.return_to_floor_mode
                 and self.state.target_floor is not None
                 and any("исследовать" in text or "исследование" in text for text, _ in buttons)
             ):
                 self.state.return_to_floor_mode = True
-                self.state.return_to_floor_step = 1
                 self.state.last_signature = None
-                logger.info(
-                    "Main menu detected; resuming route to floor %s",
-                    self.state.target_floor,
-                )
 
-            # Возврат после /start, выбора этажа, ручного входа в главное меню или починки:
-            # Главное меню -> Исследовать -> этаж -> последняя кнопка с «локация» -> Начать исследование.
+            # Самовосстанавливающаяся навигация. Мы определяем текущий экран по кнопкам,
+            # поэтому маршрут не ломается, даже если пользователь вручную перешёл на другой экран.
             if (
                 selected is None
                 and not self.state.repair_mode
                 and self.state.return_to_floor_mode
                 and self.state.target_floor is not None
             ):
-                step = self.state.return_to_floor_step
+                # После выбора локации игра может показать как «Начать», так и
+                # «Продолжить исследование». Оба варианта завершают навигацию.
+                for button_text, button in buttons:
+                    if "начать исследование" in button_text or "продолжить исследование" in button_text:
+                        action = "Продолжить исследование" if "продолжить" in button_text else "Начать исследование"
+                        selected = (button_text, button, action, None)
+                        selected_kind = "return_finish"
+                        break
 
-                if step == 0:
-                    # Если уже на главном меню, сразу пропускаем шаг «Главное меню».
-                    investigate_buttons = [
+                # Экран выбора локации: выбираем последнюю кнопку с «локац», игнорируя «Назад».
+                if selected is None:
+                    location_buttons = [
                         (button_text, button)
                         for button_text, button in buttons
-                        if "исследовать" in button_text or "исследование" in button_text
+                        if "локац" in button_text and "назад" not in button_text
                     ]
-                    if investigate_buttons:
-                        button_text, button = investigate_buttons[0]
-                        selected = (button_text, button, "Исследовать", None)
-                        selected_kind = "return_skip_main"
-                    else:
-                        for button_text, button in buttons:
-                            if "главное меню" in button_text:
-                                selected = (button_text, button, "Главное меню", None)
-                                selected_kind = "return_step"
-                                break
+                    if location_buttons:
+                        button_text, button = location_buttons[-1]
+                        selected = (button_text, button, "Последняя локация", None)
+                        selected_kind = "return_step"
 
-                elif step == 1:
-                    for button_text, button in buttons:
-                        if "исследовать" in button_text or "исследование" in button_text:
-                            selected = (button_text, button, "Исследовать", None)
-                            selected_kind = "return_step"
-                            break
-
-                elif step == 2:
+                # Экран выбора этажа.
+                if selected is None:
                     for button_text, button in buttons:
                         if floor_button_matches(button_text, self.state.target_floor):
                             selected = (
@@ -173,24 +163,23 @@ class FarmerEngine:
                             selected_kind = "return_step"
                             break
 
-                elif step == 3:
-                    location_buttons = [
-                        (button_text, button)
-                        for button_text, button in buttons
-                        if "локац" in button_text and "назад" not in button_text
-                    ]
-                    if location_buttons:
-                        button_text, button = location_buttons[-1]
-                        selected = (button_text, button, "Последняя локация", None)
-                        selected_kind = "return_step"
-
-                elif step == 4:
+                # Главное меню: нажимаем «Исследовать».
+                if selected is None:
                     for button_text, button in buttons:
-                        if "начать исследование" in button_text:
-                            selected = (button_text, button, "Начать исследование", None)
-                            selected_kind = "return_finish"
+                        if "исследовать" in button_text or "исследование" in button_text:
+                            selected = (button_text, button, "Исследовать", None)
+                            selected_kind = "return_step"
                             break
 
+                # Если мы на другом экране, сначала возвращаемся в главное меню.
+                if selected is None:
+                    for button_text, button in buttons:
+                        if "главное меню" in button_text:
+                            selected = (button_text, button, "Главное меню", None)
+                            selected_kind = "return_step"
+                            break
+
+            # Обычный фарм.
             if (
                 selected is None
                 and not self.state.repair_mode
@@ -209,11 +198,10 @@ class FarmerEngine:
 
             if selected is None:
                 logger.info(
-                    "No matching action. repair_mode=%s, repair_step=%s, return_mode=%s, return_step=%s, floor=%s, buttons=%s",
+                    "No matching action. repair_mode=%s, repair_step=%s, return_mode=%s, floor=%s, buttons=%s",
                     self.state.repair_mode,
                     self.state.repair_step,
                     self.state.return_to_floor_mode,
-                    self.state.return_to_floor_step,
                     self.state.target_floor,
                     [text for text, _ in buttons],
                 )
@@ -249,16 +237,10 @@ class FarmerEngine:
                         self.state.target_floor,
                     )
 
-            elif selected_kind == "return_skip_main":
-                self.state.return_to_floor_step = 2
-
-            elif selected_kind == "return_step":
-                self.state.return_to_floor_step += 1
-
             elif selected_kind == "return_finish":
                 self.state.return_to_floor_mode = False
                 self.state.return_to_floor_step = 0
-                logger.info("Exploration started on floor %s", self.state.target_floor)
+                logger.info("Exploration started or continued on floor %s", self.state.target_floor)
 
             logger.info("Clicked: %s (message=%s)", action_name, message.id)
             return True
