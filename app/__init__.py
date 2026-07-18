@@ -1,0 +1,1 @@
+"""SAO RPG farmer package."""
