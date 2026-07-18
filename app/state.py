@@ -25,6 +25,8 @@ class RuntimeState:
     scheduled_step: int = 0
     scheduled_last_hour: str | None = None
     scheduled_runs: int = 0
+    scheduled_confirm_clicks: int = 0
+    scheduled_arena_clicks: int = 0
 
     last_action: str = "—"
     last_message_id: int | None = None
@@ -62,6 +64,8 @@ class RuntimeState:
             f"Режим починки: {repair_status}\n"
             f"Возврат на этаж: {return_status}\n"
             f"Маршрут :25 МСК: {scheduled_status}\n"
+            f"Подтверждений атаки: {self.scheduled_confirm_clicks}\n"
+            f"Рандомных боёв: {self.scheduled_arena_clicks}\n"
             f"Запусков маршрута: {self.scheduled_runs}\n"
             f"Последнее действие: {self.last_action}"
         )
