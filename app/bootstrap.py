@@ -14,19 +14,17 @@ def patch_main() -> None:
     source = MAIN_PATH.read_text(encoding="utf-8")
 
     # Актуальное расписание по московскому времени.
-    source = source.replace(":07 —", ":33 —")
-    source = source.replace(":10 —", ":35 —")
-    source = source.replace("at :07 MSK", "at :33 MSK")
-    source = source.replace("at :10 MSK", "at :35 MSK")
-    source = source.replace("и :10 ничего", "и :35 ничего")
-    source = source.replace("waiting for :10 MSK", "waiting for :35 MSK")
-    source = source.replace("now_moscow.minute == 7", "now_moscow.minute == 33")
-    source = source.replace("now_moscow.minute >= 10", "now_moscow.minute >= 35")
+    source = source.replace(":07 —", ":45 —")
+    source = source.replace(":10 —", ":47 —")
+    source = source.replace("at :07 MSK", "at :45 MSK")
+    source = source.replace("at :10 MSK", "at :47 MSK")
+    source = source.replace("и :10 ничего", "и :47 ничего")
+    source = source.replace("waiting for :10 MSK", "waiting for :47 MSK")
+    source = source.replace("now_moscow.minute == 7", "now_moscow.minute == 45")
+    source = source.replace("now_moscow.minute >= 10", "now_moscow.minute >= 47")
 
-    # Гильдия:
-    # первый бой запускается через «Подтвердить атаку»;
-    # после каждой победы нажимается только «Ещё раз: Agrognomiki»;
-    # кнопку подтверждения повторно между боями не ищем.
+    # Гильдия: первый бой запускается через «Подтвердить атаку»,
+    # после каждой победы нажимается только «Ещё раз: Agrognomiki».
     guild_replacement = '''                if state.scheduled_step == 6:
                     zero_attacks = (
                         "осталось атак в этом часе: 0" in message_text
@@ -36,7 +34,7 @@ def patch_main() -> None:
                         or ("0 атак" in message_text and "остал" in message_text)
                     )
                     if zero_attacks:
-                        logger.info("Guild attacks exhausted; waiting for :35 MSK")
+                        logger.info("Guild attacks exhausted; waiting for :47 MSK")
                         state.scheduled_phase = "wait_arena"
                         state.scheduled_step = 0
                         state.last_signature = None
@@ -80,7 +78,7 @@ def patch_main() -> None:
                             return True
 
                     if state.scheduled_confirm_clicks >= 10:
-                        logger.info("Ten guild battles completed; waiting for :35 MSK")
+                        logger.info("Ten guild battles completed; waiting for :47 MSK")
                         state.scheduled_phase = "wait_arena"
                         state.scheduled_step = 0
                         state.last_signature = None
@@ -107,13 +105,13 @@ def patch_main() -> None:
     if guild_count != 1:
         raise RuntimeError("Could not patch guild route block in app/main.py")
 
-    # Арена:
-    # первый бой запускается кнопкой «Рандомный бой», следующие — кнопкой «Ещё раз».
-    # Всего 5 боёв либо до сообщения об использовании 5/5.
+    # Арена: первый бой — «Рандомный бой», следующие — «Ещё бой».
     arena_replacement = '''                if state.scheduled_step == 2:
                     arena_exhausted = (
                         ("5/5" in message_text and "бо" in message_text)
                         or "использовано 5/5" in message_text
+                        or "рандомных боев использовано: 5/5" in message_text
+                        or "рандомных боёв использовано: 5/5" in message_text
                         or "боёв в час 5/5" in message_text
                         or "боев в час 5/5" in message_text
                     )
@@ -129,20 +127,10 @@ def patch_main() -> None:
                             logger.info("Arena battle started: 1/5")
                             return True
 
-                    # Если игра показывает ручные боевые кнопки — проходим бой.
-                    for combat_markers in (
-                        ("скрытая атака",),
-                        ("удар 2 рук",),
-                        ("обычная атака",),
-                    ):
-                        if await click_matching(message, combat_markers):
-                            state.last_signature = None
-                            return True
-
-                    # После результата нажимаем кнопку «Ещё раз» до пяти боёв.
+                    # После результата нажимаем именно «Ещё бой».
                     if state.scheduled_arena_clicks < 5:
                         for text, row, column in buttons:
-                            if "ещё раз" in text or "еще раз" in text:
+                            if "ещё бой" in text or "еще бой" in text:
                                 await asyncio.sleep(1.0)
                                 await message.click(i=row, j=column)
                                 state.scheduled_arena_clicks += 1
@@ -158,9 +146,10 @@ def patch_main() -> None:
                         return True
 
                     logger.info(
-                        "Waiting for arena combat/repeat (%s/5); buttons=%s",
+                        "Waiting for arena repeat (%s/5); buttons=%s text=%s",
                         state.scheduled_arena_clicks,
                         texts,
+                        message_text,
                     )
                     return True
 
