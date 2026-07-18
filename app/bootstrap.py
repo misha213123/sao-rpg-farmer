@@ -219,10 +219,40 @@ def patch_main() -> None:
 
 
 def patch_engine() -> None:
-    # Маршрут починки полностью задан в REPAIR_FLOW:
-    # два нажатия «Починить всё», затем «Главное меню».
-    # /start после починки не отправляем.
-    return
+    source = ENGINE_PATH.read_text(encoding="utf-8")
+
+    marker = '''            # Случайные события во время исследования.
+            # Сначала выбираем безопасный выход «Отказаться от события», чтобы не тратить золото.
+            # Если такой кнопки нет, нажимаем последнюю доступную кнопку события.'''
+
+    clanmate_block = '''            # Особое событие «Встреча с соклановцем».
+            # Нажимаем единственную кнопку «Пройти мимо», после чего обычный
+            # маршрут исследования продолжится при обработке следующего сообщения.
+            if (
+                selected is None
+                and not self.state.repair_mode
+                and "встреча с соклановцем" in message_text
+            ):
+                for button_text, row, column in buttons:
+                    if "пройти мимо" in button_text:
+                        selected = (
+                            button_text,
+                            row,
+                            column,
+                            "Пройти мимо соклановца",
+                            None,
+                        )
+                        selected_kind = "clanmate_encounter"
+                        break
+
+'''
+
+    if "Пройти мимо соклановца" not in source:
+        if marker not in source:
+            raise RuntimeError("Could not patch clanmate encounter in app/engine.py")
+        source = source.replace(marker, clanmate_block + marker, 1)
+
+    ENGINE_PATH.write_text(source, encoding="utf-8")
 
 
 patch_engine()
