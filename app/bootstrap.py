@@ -14,18 +14,18 @@ def patch_main() -> None:
     source = MAIN_PATH.read_text(encoding="utf-8")
 
     # Актуальное расписание по московскому времени.
-    source = source.replace(":07 —", ":02 —")
-    source = source.replace(":10 —", ":04 —")
-    source = source.replace("at :07 MSK", "at :02 MSK")
-    source = source.replace("at :10 MSK", "at :04 MSK")
-    source = source.replace("и :10 ничего", "и :04 ничего")
-    source = source.replace("waiting for :10 MSK", "waiting for :04 MSK")
-    source = source.replace("now_moscow.minute == 7", "now_moscow.minute == 2")
-    source = source.replace("now_moscow.minute >= 10", "now_moscow.minute >= 4")
+    source = source.replace(":07 —", ":10 —")
+    source = source.replace(":10 —", ":12 —")
+    source = source.replace("at :07 MSK", "at :10 MSK")
+    source = source.replace("at :10 MSK", "at :12 MSK")
+    source = source.replace("и :10 ничего", "и :12 ничего")
+    source = source.replace("waiting for :10 MSK", "waiting for :12 MSK")
+    source = source.replace("now_moscow.minute == 7", "now_moscow.minute == 10")
+    source = source.replace("now_moscow.minute >= 10", "now_moscow.minute >= 12")
 
     # Гильдия: первый бой запускается через «Подтвердить атаку»,
     # после каждой победы нажимается только «Ещё раз: Agrognomiki».
-    # Если атак нет, отправляем /start и ждём арену в :04.
+    # Если атак нет, отправляем /start и ждём арену в :12.
     guild_replacement = '''                if state.scheduled_step == 6:
                     no_guild_attacks = (
                         "осталось атак в этом часе: 0" in message_text
@@ -39,7 +39,7 @@ def patch_main() -> None:
                         or "боев больше нет" in message_text
                     )
                     if no_guild_attacks:
-                        logger.info("Guild attacks unavailable; sending /start and waiting for :04 MSK")
+                        logger.info("Guild attacks unavailable; sending /start and waiting for :12 MSK")
                         state.scheduled_phase = "wait_arena"
                         state.scheduled_step = 0
                         state.last_signature = None
@@ -84,7 +84,7 @@ def patch_main() -> None:
                             return True
 
                     if state.scheduled_confirm_clicks >= 10:
-                        logger.info("Ten guild battles completed; sending /start and waiting for :04 MSK")
+                        logger.info("Ten guild battles completed; sending /start and waiting for :12 MSK")
                         state.scheduled_phase = "wait_arena"
                         state.scheduled_step = 0
                         state.last_signature = None
@@ -181,19 +181,19 @@ def patch_main() -> None:
     if arena_count != 1:
         raise RuntimeError("Could not patch arena route block in app/main.py")
 
-    # Арена должна запускаться в :04 независимо от того, успела ли гильдия
+    # Арена должна запускаться в :12 независимо от того, успела ли гильдия
     # корректно перейти в wait_arena. Это устраняет пропуск запуска арены.
     source = source.replace(
         '''                if (
                     state.enabled
-                    and now_moscow.minute >= 4
+                    and now_moscow.minute >= 12
                     and state.scheduled_last_arena_hour != hour_key
                     and state.scheduled_phase == "wait_arena"
                 ):
                     await start_arena_route(hour_key)''',
         '''                if (
                     state.enabled
-                    and now_moscow.minute >= 4
+                    and now_moscow.minute >= 12
                     and state.scheduled_last_arena_hour != hour_key
                     and state.scheduled_phase != "arena"
                 ):
