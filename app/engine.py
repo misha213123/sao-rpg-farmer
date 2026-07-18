@@ -13,6 +13,7 @@ from app.rules import (
     LOW_RESOURCE_MARKERS,
     NEVER_CLICK,
     REPAIR_FLOW,
+    RETURN_TO_FLOOR_FLOW,
     STAMINA_BUTTON_MARKERS,
     STANDARD_RULES,
     WORN_EQUIPMENT_MARKERS,
@@ -28,6 +29,18 @@ def normalize(value: str | None) -> str:
 
 def contains_any(value: str, markers: Iterable[str]) -> bool:
     return any(marker in value for marker in markers)
+
+
+def floor_button_matches(button_text: str, floor: int) -> bool:
+    compact = button_text.replace("№", " ").replace("-", " ")
+    tokens = compact.split()
+    floor_text = str(floor)
+    return (
+        button_text == floor_text
+        or f"этаж {floor_text}" in button_text
+        or f"{floor_text} этаж" in button_text
+        or floor_text in tokens
+    )
 
 
 class FarmerEngine:
@@ -79,6 +92,8 @@ class FarmerEngine:
                     logger.info("Worn equipment detected; starting repair flow")
                 self.state.repair_mode = True
                 self.state.repair_step = 0
+                self.state.return_to_floor_mode = False
+                self.state.return_to_floor_step = 0
 
             # Зелье стамины нажимается только при явном предупреждении о ресурсах.
             if contains_any(message_text, LOW_RESOURCE_MARKERS):
@@ -88,13 +103,9 @@ class FarmerEngine:
                         selected_kind = "stamina"
                         break
 
-            # Во время починки выполняется строго один текущий шаг:
-            # Главное меню -> Локации -> Кузница -> Починка -> Починить всё -> Починить всё.
+            # Строгий маршрут починки.
             if selected is None and self.state.repair_mode:
-                if self.state.repair_step >= len(REPAIR_FLOW):
-                    self.state.repair_mode = False
-                    self.state.repair_step = 0
-                else:
+                if self.state.repair_step < len(REPAIR_FLOW):
                     markers, action_name = REPAIR_FLOW[self.state.repair_step]
                     for button_text, button in buttons:
                         if contains_any(button_text, markers):
@@ -102,8 +113,39 @@ class FarmerEngine:
                             selected_kind = "repair_step"
                             break
 
-            # Обычный фарм выполняется только вне маршрута починки.
-            if selected is None and not self.state.repair_mode:
+            # После запуска или починки возвращаемся на выбранный этаж:
+            # Главное меню -> Исследовать -> выбранный этаж.
+            if (
+                selected is None
+                and not self.state.repair_mode
+                and self.state.return_to_floor_mode
+                and self.state.target_floor is not None
+            ):
+                if self.state.return_to_floor_step < len(RETURN_TO_FLOOR_FLOW):
+                    markers, action_name = RETURN_TO_FLOOR_FLOW[self.state.return_to_floor_step]
+                    for button_text, button in buttons:
+                        if contains_any(button_text, markers):
+                            selected = (button_text, button, action_name, None)
+                            selected_kind = "return_step"
+                            break
+                else:
+                    for button_text, button in buttons:
+                        if floor_button_matches(button_text, self.state.target_floor):
+                            selected = (
+                                button_text,
+                                button,
+                                f"Этаж {self.state.target_floor}",
+                                None,
+                            )
+                            selected_kind = "return_floor"
+                            break
+
+            # Обычный фарм выполняется только вне служебных маршрутов.
+            if (
+                selected is None
+                and not self.state.repair_mode
+                and not self.state.return_to_floor_mode
+            ):
                 for rule in STANDARD_RULES:
                     for button_text, button in buttons:
                         if contains_any(button_text, NEVER_CLICK):
@@ -117,9 +159,12 @@ class FarmerEngine:
 
             if selected is None:
                 logger.info(
-                    "No matching action. repair_mode=%s, repair_step=%s, buttons=%s",
+                    "No matching action. repair_mode=%s, repair_step=%s, return_mode=%s, return_step=%s, floor=%s, buttons=%s",
                     self.state.repair_mode,
                     self.state.repair_step,
+                    self.state.return_to_floor_mode,
+                    self.state.return_to_floor_step,
+                    self.state.target_floor,
                     [text for text, _ in buttons],
                 )
                 self.state.last_signature = signature
@@ -147,7 +192,20 @@ class FarmerEngine:
                     self.state.repairs += 1
                     self.state.repair_mode = False
                     self.state.repair_step = 0
-                    logger.info("Equipment repair flow completed")
+                    self.state.return_to_floor_mode = self.state.target_floor is not None
+                    self.state.return_to_floor_step = 0
+                    logger.info(
+                        "Equipment repair completed; returning to floor %s",
+                        self.state.target_floor,
+                    )
+
+            elif selected_kind == "return_step":
+                self.state.return_to_floor_step += 1
+
+            elif selected_kind == "return_floor":
+                self.state.return_to_floor_mode = False
+                self.state.return_to_floor_step = 0
+                logger.info("Returned to floor %s", self.state.target_floor)
 
             logger.info("Clicked: %s (message=%s)", action_name, message.id)
             return True
