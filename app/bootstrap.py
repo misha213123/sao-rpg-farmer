@@ -248,10 +248,37 @@ def patch_engine() -> None:
 
 '''
 
+    border_defense_block = '''            # Особое событие «Защита границ».
+            # Принимаем бой, после чего обычный маршрут исследования продолжится
+            # при обработке следующих сообщений игры.
+            if (
+                selected is None
+                and not self.state.repair_mode
+                and "защита границ" in message_text
+            ):
+                for button_text, row, column in buttons:
+                    if "принять бой" in button_text:
+                        selected = (
+                            button_text,
+                            row,
+                            column,
+                            "Принять бой на защите границ",
+                            None,
+                        )
+                        selected_kind = "border_defense"
+                        break
+
+'''
+
     if "Пройти мимо соклановца" not in source:
         if marker not in source:
             raise RuntimeError("Could not patch clanmate encounter in app/engine.py")
         source = source.replace(marker, clanmate_block + marker, 1)
+
+    if "Принять бой на защите границ" not in source:
+        if marker not in source:
+            raise RuntimeError("Could not patch border defense event in app/engine.py")
+        source = source.replace(marker, border_defense_block + marker, 1)
 
     ENGINE_PATH.write_text(source, encoding="utf-8")
 
