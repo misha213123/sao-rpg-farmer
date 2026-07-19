@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import re
 
-from telethon import TelegramClient
+from telethon import TelegramClient, events
 
 
 _original_send_message = TelegramClient.send_message
+_original_get_chat = events.NewMessage.Event.get_chat
 
 
 def _normalize(value: str | None) -> str:
@@ -71,6 +72,17 @@ async def guarded_send_message(self, entity, message="", *args, **kwargs):
     return await _original_send_message(self, entity, message, *args, **kwargs)
 
 
+async def saved_messages_get_chat(self):
+    """Надёжно распознаёт ручные команды, отправленные в «Избранное»."""
+    raw = (getattr(self, "raw_text", "") or "").strip()
+    if getattr(self, "out", False) and raw.startswith("/"):
+        client = getattr(self, "_client", None)
+        if client is not None:
+            return await client.get_me()
+    return await _original_get_chat(self)
+
+
 TelegramClient.send_message = guarded_send_message
+events.NewMessage.Event.get_chat = saved_messages_get_chat
 
 from app import bootstrap  # noqa: E402,F401
