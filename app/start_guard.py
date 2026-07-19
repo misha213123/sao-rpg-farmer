@@ -73,13 +73,27 @@ async def guarded_send_message(self, entity, message="", *args, **kwargs):
 
 
 async def saved_messages_get_chat(self):
-    """Надёжно распознаёт ручные команды, отправленные в «Избранное»."""
+    """Распознаёт команды только в «Избранном», а не в игровом боте."""
+    chat = await _original_get_chat(self)
     raw = (getattr(self, "raw_text", "") or "").strip()
-    if getattr(self, "out", False) and raw.startswith("/"):
-        client = getattr(self, "_client", None)
-        if client is not None:
-            return await client.get_me()
-    return await _original_get_chat(self)
+
+    if not (getattr(self, "out", False) and raw.startswith("/")):
+        return chat
+
+    client = getattr(self, "_client", None)
+    if client is None:
+        return chat
+
+    me = await client.get_me()
+    chat_id = getattr(chat, "id", None)
+
+    # Подменяем чат на self только когда команда действительно отправлена
+    # в «Избранное». Команды /start, отправленные игровому боту, больше не
+    # попадают в обработчик управления и не могут повторно включить фарм.
+    if chat_id == me.id:
+        return me
+
+    return chat
 
 
 TelegramClient.send_message = guarded_send_message
