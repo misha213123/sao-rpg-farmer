@@ -21,32 +21,40 @@ def _buttons(message) -> list[tuple[str, int, int]]:
         return result
     for row_index, row in enumerate(message.buttons):
         for column_index, button in enumerate(row):
-            result.append(
-                (_normalize(getattr(button, "text", "")), row_index, column_index)
-            )
+            result.append((_normalize(getattr(button, "text", "")), row_index, column_index))
     return result
 
 
 async def _finish_active_battle(client: TelegramClient, entity) -> None:
-    attack_priorities = (
+    priorities = (
         "скрытая атака",
         "удар 2 рук",
         "удар двух рук",
         "обычная атака",
         "атаковать",
     )
+    active_markers = (
+        "вы находитесь в бою",
+        "атакуйте или сбегите",
+        "выберите действие",
+        "hp босса",
+        "вы вернулись к боссу",
+    )
+    battle_seen = False
+    idle = 0
 
-    while True:
+    for _ in range(240):
         messages = await client.get_messages(entity, limit=1)
         latest = messages[0] if messages else None
         if latest is None:
-            return
+            await asyncio.sleep(0.8)
+            continue
 
         text = _normalize(latest.raw_text)
         buttons = _buttons(latest)
-        selected: tuple[int, int] | None = None
+        selected = None
 
-        for marker in attack_priorities:
+        for marker in priorities:
             for button_text, row, column in buttons:
                 if marker in button_text:
                     selected = (row, column)
@@ -55,15 +63,29 @@ async def _finish_active_battle(client: TelegramClient, entity) -> None:
                 break
 
         if selected is not None:
-            await latest.click(i=selected[0], j=selected[1])
-            await asyncio.sleep(1.2)
+            battle_seen = True
+            idle = 0
+            try:
+                await latest.click(i=selected[0], j=selected[1])
+            except Exception:
+                await asyncio.sleep(0.8)
+                continue
+            await asyncio.sleep(1.3)
             continue
 
-        if "вы находитесь в бою" in text:
-            await asyncio.sleep(1.0)
+        if any(marker in text for marker in active_markers):
+            battle_seen = True
+            idle = 0
+            await asyncio.sleep(0.9)
             continue
 
-        return
+        if not battle_seen:
+            return
+
+        idle += 1
+        if idle >= 3:
+            return
+        await asyncio.sleep(0.8)
 
 
 async def guarded_send_message(self, entity, message="", *args, **kwargs):
@@ -73,7 +95,6 @@ async def guarded_send_message(self, entity, message="", *args, **kwargs):
 
 
 async def saved_messages_get_chat(self):
-    """Распознаёт команды только в «Избранном», а не в игровом боте."""
     chat = await _original_get_chat(self)
     raw = (getattr(self, "raw_text", "") or "").strip()
 
@@ -85,14 +106,8 @@ async def saved_messages_get_chat(self):
         return chat
 
     me = await client.get_me()
-    chat_id = getattr(chat, "id", None)
-
-    # Подменяем чат на self только когда команда действительно отправлена
-    # в «Избранное». Команды /start, отправленные игровому боту, больше не
-    # попадают в обработчик управления и не могут повторно включить фарм.
-    if chat_id == me.id:
+    if getattr(chat, "id", None) == me.id:
         return me
-
     return chat
 
 
