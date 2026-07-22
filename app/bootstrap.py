@@ -200,36 +200,44 @@ def patch_main() -> None:
                     await start_arena_route(hour_key)''',
     )
 
+    # Ловим все новые сообщения, а затем вручную и строго проверяем,
+    # что это сообщение пользователя самому себе в Saved Messages.
     source = source.replace(
         '@client.on(events.NewMessage(chats="me", outgoing=True))',
+        '@client.on(events.NewMessage())',
+        1,
+    )
+    source = source.replace(
         '@client.on(events.NewMessage(outgoing=True))',
+        '@client.on(events.NewMessage())',
         1,
     )
 
-    # Проверяем Saved Messages напрямую по chat_id/peer_id. Это надёжнее,
-    # чем event.get_chat(), который в разных версиях Telethon может вернуть
-    # другой объект и из-за этого игнорировать команды /on, /off и выбор 1/2/3.
-    old_saved_check = '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
-        chat = await event.get_chat()
-        if getattr(chat, "id", None) != me.id:
-            return
+    plain_handler = '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
         raw = (event.raw_text or "").strip()'''
-    new_saved_check = '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
+    old_checked_handler = '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
         event_chat_id = getattr(event, "chat_id", None)
         peer_id = getattr(event.message, "peer_id", None)
         peer_user_id = getattr(peer_id, "user_id", None)
         if event_chat_id != me.id and peer_user_id != me.id:
             return
         raw = (event.raw_text or "").strip()'''
-    source = source.replace(old_saved_check, new_saved_check, 1)
-
-    # Также поддерживаем исходный вариант main.py без ранее добавленной проверки.
-    source = source.replace(
-        '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
-        raw = (event.raw_text or "").strip()''',
-        new_saved_check,
-        1,
-    )
+    robust_handler = '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
+        event_chat_id = getattr(event, "chat_id", None)
+        sender_id = getattr(event, "sender_id", None)
+        peer_id = getattr(event.message, "peer_id", None)
+        peer_user_id = getattr(peer_id, "user_id", None)
+        is_saved_messages = (
+            event_chat_id == me.id
+            or peer_user_id == me.id
+        )
+        is_own_message = sender_id == me.id or getattr(event.message, "out", False)
+        if not is_saved_messages or not is_own_message:
+            return
+        raw = (event.raw_text or "").strip()
+        logger.info("Saved Messages input received: %r", raw)'''
+    source = source.replace(old_checked_handler, robust_handler, 1)
+    source = source.replace(plain_handler, robust_handler, 1)
 
     MAIN_PATH.write_text(source, encoding="utf-8")
 
