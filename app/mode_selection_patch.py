@@ -27,6 +27,31 @@ def patch_state() -> None:
 def patch_main() -> None:
     source = MAIN_PATH.read_text(encoding="utf-8")
 
+    # Bootstrap historically replaced the native Saved Messages filter with a
+    # broad outgoing-message handler. Restore Telethon's native chats="me"
+    # filter before adding the menu logic; this is the most reliable way to
+    # receive /on, /off, /status and the 1/2/3 answers from Saved Messages.
+    source = source.replace(
+        '@client.on(events.NewMessage(outgoing=True))',
+        '@client.on(events.NewMessage(chats="me", outgoing=True))',
+        1,
+    )
+
+    saved_handler_header = '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
+        event_chat_id = getattr(event, "chat_id", None)
+        peer_id = getattr(event.message, "peer_id", None)
+        peer_user_id = getattr(peer_id, "user_id", None)
+        if event_chat_id != me.id and peer_user_id != me.id:
+            return
+        raw = (event.raw_text or "").strip()'''
+    native_saved_handler_header = '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
+        raw = (event.raw_text or "").strip()'''
+    source = source.replace(
+        saved_handler_header,
+        native_saved_handler_header,
+        1,
+    )
+
     # Добавляем обработку выбора режима перед обработкой номера этажа.
     awaiting_floor_marker = '        if state.awaiting_floor and not command.startswith("/"):\n'
     mode_block = '''        if state.awaiting_mode and not command.startswith("/"):
