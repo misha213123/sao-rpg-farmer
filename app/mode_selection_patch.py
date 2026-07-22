@@ -37,8 +37,10 @@ def patch_main() -> None:
                 "обычный фарм арена и гильдейский зачет": "full",
                 "обычный фарм арена и гильдейский зачёт": "full",
                 "3": "guild_only",
-                "только гильдейский зачет": "guild_only",
-                "только гильдейский зачёт": "guild_only",
+                "арена и гильдейский зачет": "guild_only",
+                "арена и гильдейский зачёт": "guild_only",
+                "только арена и гильдейский зачет": "guild_only",
+                "только арена и гильдейский зачёт": "guild_only",
             }
             selected_mode = mode_by_choice.get(choice)
             if selected_mode is None:
@@ -46,7 +48,7 @@ def patch_main() -> None:
                     "Выбери режим цифрой:\n"
                     "1 — Обычный фарм\n"
                     "2 — Обычный фарм + Арена + Гильдейский зачёт\n"
-                    "3 — Только Гильдейский зачёт"
+                    "3 — Только Арена + Гильдейский зачёт"
                 )
                 return
 
@@ -62,8 +64,8 @@ def patch_main() -> None:
                 state.awaiting_floor = False
                 state.return_to_floor_mode = False
                 await event.reply(
-                    "Режим включён: только Гильдейский зачёт ✅\n"
-                    "Обычный фарм и Арена отключены."
+                    "Режим включён: Арена + Гильдейский зачёт ✅\n"
+                    "Обычный фарм отключён."
                 )
                 return
 
@@ -108,7 +110,7 @@ def patch_main() -> None:
                 "Что запустить?\n"
                 "1 — Обычный фарм\n"
                 "2 — Обычный фарм + Арена + Гильдейский зачёт\n"
-                "3 — Только Гильдейский зачёт\n\n"
+                "3 — Только Арена + Гильдейский зачёт\n\n"
                 "Ответь цифрой: 1, 2 или 3"
             )
         elif command.startswith("/floor"):'''
@@ -145,7 +147,7 @@ def patch_main() -> None:
     if "state.automation_mode not in" not in source:
         source = source.replace(activate_marker, activate_replacement, 1)
 
-    # Гильдия работает в полном режиме и в режиме «только гильдия».
+    # Гильдия работает в полном режиме и в режиме без обычного фарма.
     guild_condition = '''                    state.enabled
                     and now_moscow.minute == 4
 '''
@@ -158,20 +160,20 @@ def patch_main() -> None:
             raise RuntimeError("Could not gate guild schedule by mode")
         source = source.replace(guild_condition, guild_condition_new, 1)
 
-    # Арена работает только в полном режиме.
+    # Арена работает в полном режиме и в режиме без обычного фарма.
     arena_condition = '''                    state.enabled
                     and now_moscow.minute >= 2
 '''
     arena_condition_new = '''                    state.enabled
-                    and state.automation_mode == "full"
+                    and state.automation_mode in ("full", "guild_only")
                     and now_moscow.minute >= 2
 '''
-    if 'state.automation_mode == "full"' not in source:
+    if 'state.automation_mode in ("full", "guild_only")\n                    and now_moscow.minute >= 2' not in source:
         if arena_condition not in source:
             raise RuntimeError("Could not gate arena schedule by mode")
         source = source.replace(arena_condition, arena_condition_new, 1)
 
-    # В режиме «только гильдия» обычный обработчик фарма не запускается.
+    # В режиме «Арена + Гильдия» обычный обработчик фарма не запускается.
     game_handler_marker = '''        if await handle_scheduled_route(event.message):
             return
         await engine.process(event.message)
