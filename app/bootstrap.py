@@ -285,4 +285,8 @@ def patch_engine() -> None:
 
 patch_engine()
 patch_main()
+
+from app.mode_selection_patch import patch_all
+
+patch_all()
 runpy.run_module("app.main", run_name="__main__")
