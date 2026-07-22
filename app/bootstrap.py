@@ -205,14 +205,29 @@ def patch_main() -> None:
         '@client.on(events.NewMessage(outgoing=True))',
         1,
     )
-    source = source.replace(
-        '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
-        raw = (event.raw_text or "").strip()''',
-        '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
+
+    # Проверяем Saved Messages напрямую по chat_id/peer_id. Это надёжнее,
+    # чем event.get_chat(), который в разных версиях Telethon может вернуть
+    # другой объект и из-за этого игнорировать команды /on, /off и выбор 1/2/3.
+    old_saved_check = '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
         chat = await event.get_chat()
         if getattr(chat, "id", None) != me.id:
             return
+        raw = (event.raw_text or "").strip()'''
+    new_saved_check = '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
+        event_chat_id = getattr(event, "chat_id", None)
+        peer_id = getattr(event.message, "peer_id", None)
+        peer_user_id = getattr(peer_id, "user_id", None)
+        if event_chat_id != me.id and peer_user_id != me.id:
+            return
+        raw = (event.raw_text or "").strip()'''
+    source = source.replace(old_saved_check, new_saved_check, 1)
+
+    # Также поддерживаем исходный вариант main.py без ранее добавленной проверки.
+    source = source.replace(
+        '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
         raw = (event.raw_text or "").strip()''',
+        new_saved_check,
         1,
     )
 
