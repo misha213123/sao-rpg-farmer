@@ -11,23 +11,25 @@ STATE_PATH = ROOT / "state.py"
 
 def patch_state() -> None:
     source = STATE_PATH.read_text(encoding="utf-8")
-    if "automation_mode:" not in source:
+
+    if "awaiting_mode:" not in source:
         source = source.replace(
-            "    target_floor: int | None = None\n",
-            "    target_floor: int | None = None\n"
+            "    awaiting_floor: bool = False\n",
+            "    awaiting_floor: bool = False\n"
             "    awaiting_mode: bool = False\n"
             "    automation_mode: str = \"off\"\n",
             1,
         )
+
     STATE_PATH.write_text(source, encoding="utf-8")
 
 
 def patch_main() -> None:
     source = MAIN_PATH.read_text(encoding="utf-8")
 
-    awaiting_floor_marker = '''        if state.awaiting_floor and not command.startswith("/"):
-'''
-    mode_choice_block = '''        if state.awaiting_mode and not command.startswith("/"):
+    # Добавляем обработку выбора режима перед обработкой номера этажа.
+    awaiting_floor_marker = '        if state.awaiting_floor and not command.startswith("/"):\n'
+    mode_block = '''        if state.awaiting_mode and not command.startswith("/"):
             choice = command.strip()
             mode_by_choice = {
                 "1": "farm",
@@ -44,13 +46,14 @@ def patch_main() -> None:
             selected_mode = mode_by_choice.get(choice)
             if selected_mode is None:
                 await event.reply(
-                    "Выбери режим цифрой:\\n"
-                    "1 — Обычный фарм\\n"
-                    "2 — Обычный фарм + Арена + Гильдейский зачёт\\n"
+                    "Выбери режим цифрой:\n"
+                    "1 — Обычный фарм\n"
+                    "2 — Обычный фарм + Арена + Гильдейский зачёт\n"
                     "3 — Только Арена + Гильдейский зачёт"
                 )
                 return
 
+            logger.info("Mode selected from Saved Messages: %s", selected_mode)
             state.awaiting_mode = False
             state.automation_mode = selected_mode
             state.scheduled_mode = False
@@ -63,7 +66,7 @@ def patch_main() -> None:
                 state.awaiting_floor = False
                 state.return_to_floor_mode = False
                 await event.reply(
-                    "Режим включён: Арена + Гильдейский зачёт ✅\\n"
+                    "Режим включён: Арена + Гильдейский зачёт ✅\n"
                     "Обычный фарм отключён."
                 )
                 return
@@ -77,26 +80,26 @@ def patch_main() -> None:
                 else "Обычный фарм + Арена + Гильдейский зачёт"
             )
             await event.reply(
-                f"Выбран режим: {mode_name}\\n"
+                f"Выбран режим: {mode_name}\n"
                 "На каком этаже фармить? Напиши только номер, например: 25"
             )
             return
 
 '''
-    if "mode_by_choice =" not in source:
-        if awaiting_floor_marker not in source:
-            raise RuntimeError("Could not insert /on mode selection")
+    if "mode_by_choice =" not in source and awaiting_floor_marker in source:
         source = source.replace(
             awaiting_floor_marker,
-            mode_choice_block + awaiting_floor_marker,
+            mode_block + awaiting_floor_marker,
             1,
         )
 
+    # Полностью заменяем ветку /on, не затрагивая остальные команды.
     on_pattern = re.compile(
-        r'''        elif command == "/on":\n.*?            \)\n        elif command\.startswith\("/floor"\):''',
+        r'        elif command == "/on":\n.*?(?=        elif command\.startswith\("/floor"\):)',
         re.DOTALL,
     )
     on_replacement = '''        elif command == "/on":
+            logger.info("Saved command received: /on")
             state.enabled = False
             state.awaiting_mode = True
             state.awaiting_floor = False
@@ -106,30 +109,16 @@ def patch_main() -> None:
             state.scheduled_step = 0
             state.last_signature = None
             await event.reply(
-                "Что запустить?\\n"
-                "1 — Обычный фарм\\n"
-                "2 — Обычный фарм + Арена + Гильдейский зачёт\\n"
-                "3 — Только Арена + Гильдейский зачёт\\n\\n"
+                "Что запустить?\n"
+                "1 — Обычный фарм\n"
+                "2 — Обычный фарм + Арена + Гильдейский зачёт\n"
+                "3 — Только Арена + Гильдейский зачёт\n\n"
                 "Ответь цифрой: 1, 2 или 3"
             )
-        elif command.startswith("/floor"):'''
-    source, on_count = on_pattern.subn(on_replacement, source, count=1)
-    if on_count != 1 and "Что запустить?" not in source:
-        raise RuntimeError("Could not replace /on command")
-
-    off_marker = '''        elif command == "/off":
-            state.enabled = False
 '''
-    off_replacement = '''        elif command == "/off":
-            state.enabled = False
-            state.awaiting_mode = False
-            state.automation_mode = "off"
-'''
-    if 'state.automation_mode = "off"' not in source:
-        if off_marker not in source:
-            raise RuntimeError("Could not extend /off command")
-        source = source.replace(off_marker, off_replacement, 1)
+    source = on_pattern.sub(on_replacement, source, count=1)
 
+    # При выборе этажа сохраняем режим, выбранный через /on.
     activate_marker = '''        state.target_floor = floor
         state.awaiting_floor = False
         state.enabled = True
@@ -139,42 +128,56 @@ def patch_main() -> None:
         state.enabled = True
         if state.automation_mode not in ("farm", "full"):
             state.automation_mode = "farm"
+        logger.info("Floor selected from Saved Messages: %s", floor)
 '''
-    if "state.automation_mode not in" not in source:
+    if "Floor selected from Saved Messages" not in source and activate_marker in source:
         source = source.replace(activate_marker, activate_replacement, 1)
 
-    guild_condition = '''                    state.enabled
-                    and now_moscow.minute == 4
+    # /off сбрасывает режим и все ожидания.
+    off_marker = '''        elif command == "/off":
+            state.enabled = False
 '''
-    guild_condition_new = '''                    state.enabled
-                    and state.automation_mode in ("full", "scheduled_only")
-                    and now_moscow.minute == 4
+    off_replacement = '''        elif command == "/off":
+            logger.info("Saved command received: /off")
+            state.enabled = False
+            state.awaiting_mode = False
+            state.automation_mode = "off"
 '''
-    if 'state.automation_mode in ("full", "scheduled_only")\n                    and now_moscow.minute == 4' not in source:
-        source = source.replace(guild_condition, guild_condition_new, 1)
+    if "Saved command received: /off" not in source and off_marker in source:
+        source = source.replace(off_marker, off_replacement, 1)
 
-    arena_condition = '''                    state.enabled
-                    and now_moscow.minute >= 2
-'''
-    arena_condition_new = '''                    state.enabled
-                    and state.automation_mode in ("full", "scheduled_only")
-                    and now_moscow.minute >= 2
-'''
-    if 'state.automation_mode in ("full", "scheduled_only")\n                    and now_moscow.minute >= 2' not in source:
-        source = source.replace(arena_condition, arena_condition_new, 1)
+    # Плановые маршруты включены только в режимах full и scheduled_only.
+    guild_condition = re.compile(
+        r'(\s+state\.enabled\n)(\s+and now_moscow\.minute == 4\n)'
+    )
+    source = guild_condition.sub(
+        r'\1                    and state.automation_mode in ("full", "scheduled_only")\n\2',
+        source,
+        count=1,
+    )
 
-    game_handler_marker = '''        if await handle_scheduled_route(event.message):
+    arena_condition = re.compile(
+        r'(\s+state\.enabled\n)(\s+and now_moscow\.minute >= 2\n)'
+    )
+    source = arena_condition.sub(
+        r'\1                    and state.automation_mode in ("full", "scheduled_only")\n\2',
+        source,
+        count=1,
+    )
+
+    # В scheduled_only сообщения игры обрабатывают только плановые маршруты.
+    game_handler = '''        if await handle_scheduled_route(event.message):
             return
         await engine.process(event.message)
 '''
-    game_handler_replacement = '''        if await handle_scheduled_route(event.message):
+    scheduled_only_handler = '''        if await handle_scheduled_route(event.message):
             return
         if state.automation_mode == "scheduled_only":
             return
         await engine.process(event.message)
 '''
     if source.count('if state.automation_mode == "scheduled_only":') < 2:
-        source = source.replace(game_handler_marker, game_handler_replacement, 2)
+        source = source.replace(game_handler, scheduled_only_handler, 2)
 
     MAIN_PATH.write_text(source, encoding="utf-8")
 
