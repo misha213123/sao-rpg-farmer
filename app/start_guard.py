@@ -21,40 +21,33 @@ def _buttons(message) -> list[tuple[str, int, int]]:
         return result
     for row_index, row in enumerate(message.buttons):
         for column_index, button in enumerate(row):
-            result.append((_normalize(getattr(button, "text", "")), row_index, column_index))
+            result.append(
+                (_normalize(getattr(button, "text", "")), row_index, column_index)
+            )
     return result
 
 
 async def _finish_active_battle(client: TelegramClient, entity) -> None:
-    priorities = (
+    attack_priorities = (
         "скрытая атака",
         "удар 2 рук",
         "удар двух рук",
         "обычная атака",
         "атаковать",
     )
-    active_markers = (
-        "вы находитесь в бою",
-        "атакуйте или сбегите",
-        "выберите действие",
-        "hp босса",
-        "вы вернулись к боссу",
-    )
-    battle_seen = False
-    idle = 0
 
-    for _ in range(240):
+    empty_checks = 0
+    while True:
         messages = await client.get_messages(entity, limit=1)
         latest = messages[0] if messages else None
         if latest is None:
-            await asyncio.sleep(0.8)
-            continue
+            return
 
         text = _normalize(latest.raw_text)
         buttons = _buttons(latest)
-        selected = None
+        selected: tuple[int, int] | None = None
 
-        for marker in priorities:
+        for marker in attack_priorities:
             for button_text, row, column in buttons:
                 if marker in button_text:
                     selected = (row, column)
@@ -63,29 +56,23 @@ async def _finish_active_battle(client: TelegramClient, entity) -> None:
                 break
 
         if selected is not None:
-            battle_seen = True
-            idle = 0
-            try:
-                await latest.click(i=selected[0], j=selected[1])
-            except Exception:
-                await asyncio.sleep(0.8)
-                continue
-            await asyncio.sleep(1.3)
+            empty_checks = 0
+            await latest.click(i=selected[0], j=selected[1])
+            await asyncio.sleep(1.2)
             continue
 
-        if any(marker in text for marker in active_markers):
-            battle_seen = True
-            idle = 0
-            await asyncio.sleep(0.9)
+        if "вы находитесь в бою" in text:
+            empty_checks = 0
+            await asyncio.sleep(1.0)
             continue
 
-        if not battle_seen:
-            return
+        # Одно промежуточное сообщение без кнопок ещё не означает конец боя.
+        empty_checks += 1
+        if empty_checks < 3:
+            await asyncio.sleep(1.0)
+            continue
 
-        idle += 1
-        if idle >= 3:
-            return
-        await asyncio.sleep(0.8)
+        return
 
 
 async def guarded_send_message(self, entity, message="", *args, **kwargs):
@@ -95,19 +82,30 @@ async def guarded_send_message(self, entity, message="", *args, **kwargs):
 
 
 async def saved_messages_get_chat(self):
-    chat = await _original_get_chat(self)
+    """Надёжно распознаёт команды только в чате «Избранное»."""
     raw = (getattr(self, "raw_text", "") or "").strip()
-
     if not (getattr(self, "out", False) and raw.startswith("/")):
-        return chat
+        return await _original_get_chat(self)
 
     client = getattr(self, "_client", None)
     if client is None:
-        return chat
+        return await _original_get_chat(self)
 
     me = await client.get_me()
+
+    # В разных версиях Telethon Saved Messages может определяться через
+    # chat_id, peer_id.user_id либо объект чата. Проверяем все варианты.
+    chat_id = getattr(self, "chat_id", None)
+    peer_id = getattr(self, "peer_id", None)
+    peer_user_id = getattr(peer_id, "user_id", None)
+
+    if chat_id == me.id or peer_user_id == me.id:
+        return me
+
+    chat = await _original_get_chat(self)
     if getattr(chat, "id", None) == me.id:
         return me
+
     return chat
 
 
