@@ -27,10 +27,6 @@ def patch_state() -> None:
 def patch_main() -> None:
     source = MAIN_PATH.read_text(encoding="utf-8")
 
-    # Bootstrap historically replaced the native Saved Messages filter with a
-    # broad outgoing-message handler. Restore Telethon's native chats="me"
-    # filter before adding the menu logic; this is the most reliable way to
-    # receive /on, /off, /status and the 1/2/3 answers from Saved Messages.
     source = source.replace(
         '@client.on(events.NewMessage(outgoing=True))',
         '@client.on(events.NewMessage(chats="me", outgoing=True))',
@@ -52,7 +48,6 @@ def patch_main() -> None:
         1,
     )
 
-    # Добавляем обработку выбора режима перед обработкой номера этажа.
     awaiting_floor_marker = '        if state.awaiting_floor and not command.startswith("/"):\n'
     mode_block = '''        if state.awaiting_mode and not command.startswith("/"):
             choice = command.strip()
@@ -71,9 +66,9 @@ def patch_main() -> None:
             selected_mode = mode_by_choice.get(choice)
             if selected_mode is None:
                 await event.reply(
-                    "Выбери режим цифрой:\n"
-                    "1 — Обычный фарм\n"
-                    "2 — Обычный фарм + Арена + Гильдейский зачёт\n"
+                    "Выбери режим цифрой:\\n"
+                    "1 — Обычный фарм\\n"
+                    "2 — Обычный фарм + Арена + Гильдейский зачёт\\n"
                     "3 — Только Арена + Гильдейский зачёт"
                 )
                 return
@@ -91,7 +86,7 @@ def patch_main() -> None:
                 state.awaiting_floor = False
                 state.return_to_floor_mode = False
                 await event.reply(
-                    "Режим включён: Арена + Гильдейский зачёт ✅\n"
+                    "Режим включён: Арена + Гильдейский зачёт ✅\\n"
                     "Обычный фарм отключён."
                 )
                 return
@@ -105,7 +100,7 @@ def patch_main() -> None:
                 else "Обычный фарм + Арена + Гильдейский зачёт"
             )
             await event.reply(
-                f"Выбран режим: {mode_name}\n"
+                f"Выбран режим: {mode_name}\\n"
                 "На каком этаже фармить? Напиши только номер, например: 25"
             )
             return
@@ -118,7 +113,6 @@ def patch_main() -> None:
             1,
         )
 
-    # Полностью заменяем ветку /on, не затрагивая остальные команды.
     on_pattern = re.compile(
         r'        elif command == "/on":\n.*?(?=        elif command\.startswith\("/floor"\):)',
         re.DOTALL,
@@ -134,16 +128,15 @@ def patch_main() -> None:
             state.scheduled_step = 0
             state.last_signature = None
             await event.reply(
-                "Что запустить?\n"
-                "1 — Обычный фарм\n"
-                "2 — Обычный фарм + Арена + Гильдейский зачёт\n"
-                "3 — Только Арена + Гильдейский зачёт\n\n"
+                "Что запустить?\\n"
+                "1 — Обычный фарм\\n"
+                "2 — Обычный фарм + Арена + Гильдейский зачёт\\n"
+                "3 — Только Арена + Гильдейский зачёт\\n\\n"
                 "Ответь цифрой: 1, 2 или 3"
             )
 '''
     source = on_pattern.sub(on_replacement, source, count=1)
 
-    # При выборе этажа сохраняем режим, выбранный через /on.
     activate_marker = '''        state.target_floor = floor
         state.awaiting_floor = False
         state.enabled = True
@@ -158,7 +151,6 @@ def patch_main() -> None:
     if "Floor selected from Saved Messages" not in source and activate_marker in source:
         source = source.replace(activate_marker, activate_replacement, 1)
 
-    # /off сбрасывает режим и все ожидания.
     off_marker = '''        elif command == "/off":
             state.enabled = False
 '''
@@ -171,7 +163,6 @@ def patch_main() -> None:
     if "Saved command received: /off" not in source and off_marker in source:
         source = source.replace(off_marker, off_replacement, 1)
 
-    # Плановые маршруты включены только в режимах full и scheduled_only.
     guild_condition = re.compile(
         r'(\s+state\.enabled\n)(\s+and now_moscow\.minute == 4\n)'
     )
@@ -190,7 +181,6 @@ def patch_main() -> None:
         count=1,
     )
 
-    # В scheduled_only сообщения игры обрабатывают только плановые маршруты.
     game_handler = '''        if await handle_scheduled_route(event.message):
             return
         await engine.process(event.message)
