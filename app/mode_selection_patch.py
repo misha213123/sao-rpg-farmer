@@ -135,7 +135,9 @@ def patch_main() -> None:
                 "Ответь цифрой: 1, 2 или 3"
             )
 '''
-    source = on_pattern.sub(on_replacement, source, count=1)
+    # Важно: lambda не даёт re.sub интерпретировать \\n внутри
+    # сгенерированного Python-кода как реальные переносы строк.
+    source = on_pattern.sub(lambda _: on_replacement, source, count=1)
 
     activate_marker = '''        state.target_floor = floor
         state.awaiting_floor = False
