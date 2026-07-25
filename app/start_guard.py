@@ -5,6 +5,8 @@ import re
 
 from telethon import TelegramClient, events
 
+from app.routes.combat import select_combat_button
+
 
 _original_send_message = TelegramClient.send_message
 _original_get_chat = events.NewMessage.Event.get_chat
@@ -28,14 +30,6 @@ def _buttons(message) -> list[tuple[str, int, int]]:
 
 
 async def _finish_active_battle(client: TelegramClient, entity) -> None:
-    attack_priorities = (
-        "скрытая атака",
-        "удар 2 рук",
-        "удар двух рук",
-        "обычная атака",
-        "атаковать",
-    )
-
     empty_checks = 0
     while True:
         messages = await client.get_messages(entity, limit=1)
@@ -45,19 +39,27 @@ async def _finish_active_battle(client: TelegramClient, entity) -> None:
 
         text = _normalize(latest.raw_text)
         buttons = _buttons(latest)
-        selected: tuple[int, int] | None = None
-
-        for marker in attack_priorities:
-            for button_text, row, column in buttons:
-                if marker in button_text:
-                    selected = (row, column)
-                    break
-            if selected is not None:
-                break
+        selected = select_combat_button(buttons)
 
         if selected is not None:
+            _button_text, row, column = selected
             empty_checks = 0
-            await latest.click(i=selected[0], j=selected[1])
+            await latest.click(i=row, j=column)
+            await asyncio.sleep(1.2)
+            continue
+
+        # Иногда игра сначала показывает только кнопку входа/возобновления боя.
+        attack_entry = next(
+            (
+                (row, column)
+                for button_text, row, column in buttons
+                if "атаковать" in button_text
+            ),
+            None,
+        )
+        if attack_entry is not None:
+            empty_checks = 0
+            await latest.click(i=attack_entry[0], j=attack_entry[1])
             await asyncio.sleep(1.2)
             continue
 
