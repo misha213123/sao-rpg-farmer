@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
+
+from app.state import RuntimeState
 
 ButtonInfo = tuple[str, int, int]
 SelectedAction = tuple[str, int, int, str, str | None]
@@ -22,19 +25,26 @@ CATCH_MARKERS = (
     "предмет",
 )
 
-# После обычного заброса кнопка «Проверить удочку» уже видна, но нажимать её
-# нельзя, пока игра прямо говорит ждать клёва.
-WAITING_AFTER_CAST_MARKERS = (
-    "удочка заброшена",
-    "жди клёва",
-    "жди клева",
-)
-
 CHECK_ROD_MARKERS = ("проверить удочку",)
 PULL_ROD_MARKERS = ("вытащить удочку",)
 CAST_ROD_MARKERS = ("забросить удочку",)
 FISHING_MARKERS = ("рыбалка",)
 LOCATIONS_MARKERS = ("локации",)
+
+RARITY_COUNTERS = (
+    ("легендар", "fishing_legendary"),
+    ("эпическ", "fishing_epic"),
+    ("необычн", "fishing_uncommon"),
+    ("редк", "fishing_rare"),
+    ("обычн", "fishing_common"),
+)
+
+CHEST_MONEY_MARKERS = (
+    "золот",
+    "монет",
+    "серебр",
+    "кредит",
+)
 
 
 def contains_any(value: str, markers: Iterable[str]) -> bool:
@@ -66,6 +76,35 @@ def make_action(
     ), kind
 
 
+def _extract_chest_earnings(message_text: str) -> int:
+    if "сундук" not in message_text or not contains_any(message_text, CHEST_MONEY_MARKERS):
+        return 0
+
+    amounts: list[int] = []
+    for match in re.finditer(r"(?:\+\s*)?(\d[\d\s.,]*)", message_text):
+        raw = re.sub(r"[^0-9]", "", match.group(1))
+        if raw:
+            amounts.append(int(raw))
+    return max(amounts, default=0)
+
+
+def record_fishing_result(message_text: str, state: RuntimeState) -> None:
+    """Обновляет только дневную статистику рыбалки из сообщений с результатом."""
+    state.reset_fishing_stats_if_needed()
+
+    # Считаем рыбу только после фактического улова, а не на экране глубинного зрения.
+    caught = "поймана" in message_text or "рыба добавлена в улов" in message_text
+    if caught:
+        for marker, counter_name in RARITY_COUNTERS:
+            if marker in message_text:
+                setattr(state, counter_name, getattr(state, counter_name) + 1)
+                break
+
+    chest_earnings = _extract_chest_earnings(message_text)
+    if chest_earnings > 0:
+        state.fishing_chest_earnings += chest_earnings
+
+
 def select_fishing_action(
     message_text: str,
     buttons: list[ButtonInfo],
@@ -76,52 +115,33 @@ def select_fishing_action(
     /start -> Локации -> Рыбалка -> Забросить удочку.
 
     Цикл:
-    - известная или неизвестная поклёвка -> Проверить удочку -> Забросить удочку;
-    - мусор -> Вытащить удочку -> Забросить удочку;
-    - просьба Ниджи -> Дать наживку и продолжить ожидание;
-    - сразу после заброса ничего не нажимать до появления нового события.
+    - рыба, сундук, предмет или неизвестное событие -> Проверить удочку;
+    - мусор -> Вытащить удочку;
+    - после результата -> Забросить удочку;
+    - просьба Ниджи -> Дать наживку и продолжить ожидание.
     """
-    # Событие Ниджи имеет самый высокий приоритет.
     if contains_any(message_text, NIJI_MESSAGE_MARKERS):
         give_bait = find_button(buttons, GIVE_BAIT_MARKERS)
         if give_bait is not None:
             return make_action(give_bait, "Дать наживку Ниджи", "fishing_give_bait")
         return None, "fishing_wait_niji"
 
-    # Мусор нельзя проверять: удочку нужно вытащить.
     if "глубинное зрение" in message_text and contains_any(message_text, TRASH_MARKERS):
         pull_rod = find_button(buttons, PULL_ROD_MARKERS)
         if pull_rod is not None:
             return make_action(pull_rod, "Вытащить удочку: мусор", "fishing_pull_trash")
         return None, "fishing_wait_trash"
 
-    # Известную рыбу, сундук и предмет забираем через проверку удочки.
     if "глубинное зрение" in message_text and contains_any(message_text, CATCH_MARKERS):
         check_rod = find_button(buttons, CHECK_ROD_MARKERS)
         if check_rod is not None:
             return make_action(check_rod, "Проверить удочку", "fishing_check")
         return None, "fishing_wait_catch"
 
-    # Сразу после заброса кнопка проверки уже присутствует, но здесь ждём клёва.
-    if contains_any(message_text, WAITING_AFTER_CAST_MARKERS):
-        return None, "fishing_wait_bite"
-
-    # Запасное правило для любых новых и неизвестных событий рыбалки:
-    # если игра предлагает «Проверить удочку», нажимаем её.
-    check_rod = find_button(buttons, CHECK_ROD_MARKERS)
-    if check_rod is not None:
-        return make_action(
-            check_rod,
-            "Проверить удочку: неизвестное событие",
-            "fishing_check_fallback",
-        )
-
-    # После улова или вытаскивания мусора снова забрасываем удочку.
     cast_rod = find_button(buttons, CAST_ROD_MARKERS)
     if cast_rod is not None:
         return make_action(cast_rod, "Забросить удочку", "fishing_cast")
 
-    # Навигация из /start в рыбалку.
     fishing = find_button(buttons, FISHING_MARKERS)
     if fishing is not None:
         return make_action(fishing, "Рыбалка", "fishing_navigation")
@@ -129,5 +149,11 @@ def select_fishing_action(
     locations = find_button(buttons, LOCATIONS_MARKERS)
     if locations is not None:
         return make_action(locations, "Локации", "fishing_navigation")
+
+    # Для неизвестного события рыбалки используем безопасный общий вариант.
+    if "удочка заброшена" not in message_text:
+        check_rod = find_button(buttons, CHECK_ROD_MARKERS)
+        if check_rod is not None:
+            return make_action(check_rod, "Проверить удочку: неизвестное событие", "fishing_check")
 
     return None, "fishing_wait"
