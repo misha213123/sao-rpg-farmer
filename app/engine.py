@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from telethon.tl.custom.message import Message
 
 from app.config import Settings
+from app.routes.combat import select_combat_action
 from app.routes.events import (
     select_player_encounter_action,
     select_random_event_action,
@@ -150,6 +151,11 @@ class FarmerEngine:
                     message_text,
                     buttons,
                 )
+
+            # Обычный бой теперь обрабатывается отдельным модулем. Приоритет строгий:
+            # Скрытая атака -> Удар 2 рук -> Удар в воздухе -> Обычная атака.
+            if selected is None and not self.state.repair_mode:
+                selected, selected_kind = select_combat_action(buttons)
 
             if (
                 selected is None
