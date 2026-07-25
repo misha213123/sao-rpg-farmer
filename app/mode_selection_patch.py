@@ -62,6 +62,9 @@ def patch_main() -> None:
                 "арена и гильдейский зачёт": "scheduled_only",
                 "только арена и гильдейский зачет": "scheduled_only",
                 "только арена и гильдейский зачёт": "scheduled_only",
+                "4": "semi_auto",
+                "полуавтоматический фарм": "semi_auto",
+                "полуавтомат": "semi_auto",
             }
             selected_mode = mode_by_choice.get(choice)
             if selected_mode is None:
@@ -69,7 +72,8 @@ def patch_main() -> None:
                     "Выбери режим цифрой:\\n"
                     "1 — Обычный фарм\\n"
                     "2 — Обычный фарм + Арена + Гильдейский зачёт\\n"
-                    "3 — Только Арена + Гильдейский зачёт"
+                    "3 — Только Арена + Гильдейский зачёт\\n"
+                    "4 — Полуавтоматический фарм"
                 )
                 return
 
@@ -94,11 +98,12 @@ def patch_main() -> None:
             state.enabled = False
             state.awaiting_floor = True
             state.return_to_floor_mode = False
-            mode_name = (
-                "Обычный фарм"
-                if selected_mode == "farm"
-                else "Обычный фарм + Арена + Гильдейский зачёт"
-            )
+            if selected_mode == "farm":
+                mode_name = "Обычный фарм"
+            elif selected_mode == "full":
+                mode_name = "Обычный фарм + Арена + Гильдейский зачёт"
+            else:
+                mode_name = "Полуавтоматический фарм"
             await event.reply(
                 f"Выбран режим: {mode_name}\\n"
                 "На каком этаже фармить? Напиши только номер, например: 25"
@@ -131,8 +136,9 @@ def patch_main() -> None:
                 "Что запустить?\\n"
                 "1 — Обычный фарм\\n"
                 "2 — Обычный фарм + Арена + Гильдейский зачёт\\n"
-                "3 — Только Арена + Гильдейский зачёт\\n\\n"
-                "Ответь цифрой: 1, 2 или 3"
+                "3 — Только Арена + Гильдейский зачёт\\n"
+                "4 — Полуавтоматический фарм\\n\\n"
+                "Ответь цифрой: 1, 2, 3 или 4"
             )
 '''
     source = on_pattern.sub(lambda _match: on_replacement, source, count=1)
@@ -144,7 +150,7 @@ def patch_main() -> None:
     activate_replacement = '''        state.target_floor = floor
         state.awaiting_floor = False
         state.enabled = True
-        if state.automation_mode not in ("farm", "full"):
+        if state.automation_mode not in ("farm", "full", "semi_auto"):
             state.automation_mode = "farm"
         logger.info("Floor selected from Saved Messages: %s", floor)
 '''
