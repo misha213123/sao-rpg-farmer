@@ -27,6 +27,28 @@ def patch_state() -> None:
 def patch_main() -> None:
     source = MAIN_PATH.read_text(encoding="utf-8")
 
+    # Startup restoration must respect the latest explicit /off command.
+    # A later /start is only a navigation command and must never turn automation on.
+    startup_off_old = '''        if command == "/off":
+            restored_enabled = False
+            pending_floor = False
+            continue
+'''
+    startup_off_new = '''        if command == "/off":
+            restored_enabled = False
+            pending_floor = False
+            state.target_floor = None
+            continue
+'''
+    source = source.replace(startup_off_old, startup_off_new, 1)
+    source = source.replace(
+        '''        if command == "/start" and state.target_floor is not None:
+            restored_enabled = True
+''',
+        "",
+        1,
+    )
+
     source = source.replace(
         '@client.on(events.NewMessage(outgoing=True))',
         '@client.on(events.NewMessage(chats="me", outgoing=True))',
@@ -181,7 +203,20 @@ def patch_main() -> None:
             logger.info("Saved command received: /off")
             state.enabled = False
             state.awaiting_mode = False
+            state.awaiting_floor = False
             state.automation_mode = "off"
+            state.target_floor = None
+            state.return_to_floor_mode = False
+            state.return_to_floor_step = 0
+            state.repair_mode = False
+            state.repair_step = 0
+            state.stamina_mode = False
+            state.stamina_step = 0
+            state.stamina_route = ""
+            state.scheduled_mode = False
+            state.scheduled_phase = ""
+            state.scheduled_step = 0
+            state.last_signature = None
 '''
     if "Saved command received: /off" not in source and off_marker in source:
         source = source.replace(off_marker, off_replacement, 1)
