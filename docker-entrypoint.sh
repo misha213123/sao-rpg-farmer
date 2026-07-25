@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 
-exec python -m app.manual_control_patch
+exec python -m app.multi_account_launcher
