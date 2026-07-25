@@ -10,7 +10,6 @@ from app.state import RuntimeState
 ButtonInfo = tuple[str, int, int]
 SelectedAction = tuple[str, int, int, str, str | None]
 
-CONTINUE_MARKERS = ("продолжить исследование",)
 PLAYER_ENCOUNTER_MARKERS = (
     "встреча с игроком",
     "вы столкнулись с",
@@ -33,9 +32,11 @@ MANUAL_MESSAGE_MARKERS = (
     "арена",
 )
 
+# «Баффы» и «Зелья» специально не блокируют весь экран: эти кнопки могут быть
+# видны в обычном меню и раньше мешали полуавтомату перейти на выбранный этаж.
+# Сам скрипт их не выбирает, а внутри ручного восстановления явные кнопки ниже
+# останавливают автоматизацию.
 MANUAL_BUTTON_MARKERS = (
-    "баффы",
-    "зелья",
     "выпить зелье стамины",
     "использовать восстановление стамины",
     "пройти мимо",
@@ -100,7 +101,6 @@ def select_semi_auto_action(
     Stamina handling, random events, clanmate encounters, treasure screens,
     Arena, Guild ranking and unknown screens are left for the player.
     """
-    # Починка должна работать так же, как в полном режиме.
     start_repair_if_needed(message_text, state)
     repair_action, repair_kind = select_repair_action(buttons, state)
     if repair_action is not None or repair_kind == "repair_wait":
@@ -110,16 +110,13 @@ def select_semi_auto_action(
     if player_action is not None or player_kind == "semi_auto_wait":
         return player_action, player_kind
 
-    # Любые остальные события и специальные экраны оставляем пользователю.
     if is_manual_screen(message_text, buttons):
         return None, "semi_auto_manual"
 
-    # Бьём босса и обычных мобов тем же строгим приоритетом атак.
     combat_action, combat_kind = select_combat_action(buttons)
     if combat_action is not None:
         return combat_action, combat_kind
 
-    # Полностью проходим обычный маршрут до выбранного этажа и продолжаем фарм.
     if state.target_floor is not None:
         farm_action, farm_kind = select_farm_action(buttons, state.target_floor)
         if farm_action is not None:
