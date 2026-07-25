@@ -9,6 +9,11 @@ from collections.abc import Iterable
 from telethon.tl.custom.message import Message
 
 from app.config import Settings
+from app.routes.events import (
+    select_player_encounter_action,
+    select_random_event_action,
+)
+from app.routes.farm import select_farm_action
 from app.rules import (
     LOW_RESOURCE_MARKERS,
     NEVER_CLICK,
@@ -31,52 +36,6 @@ def normalize(value: str | None) -> str:
 
 def contains_any(value: str, markers: Iterable[str]) -> bool:
     return any(marker in value for marker in markers)
-
-
-def floor_button_matches(button_text: str, floor: int) -> bool:
-    compact = button_text.replace("№", " ").replace("-", " ")
-    tokens = compact.split()
-    floor_text = str(floor)
-    return (
-        button_text == floor_text
-        or f"этаж {floor_text}" in button_text
-        or f"{floor_text} этаж" in button_text
-        or floor_text in tokens
-    )
-
-
-def is_exploration_location(button_text: str) -> bool:
-    """Локация внутри этажа, но не пункт главного меню «Локации»."""
-    if "назад" in button_text:
-        return False
-    if "локация" not in button_text:
-        return False
-    if button_text.startswith("локации") or " локации" in button_text:
-        return False
-    return True
-
-
-def is_main_explore_button(button_text: str) -> bool:
-    """Кнопка главного меню «Исследовать», включая эмодзи перед текстом."""
-    return (
-        "исследовать" in button_text
-        and "продолжить" not in button_text
-        and "начать" not in button_text
-        and "исследование" not in button_text
-    )
-
-
-def is_event_message(message_text: str, buttons: list[ButtonInfo]) -> bool:
-    """Определяет случайное событие, которое блокирует продолжение исследования."""
-    event_markers = (
-        "активное событие",
-        "событие:",
-        "откажитесь от него",
-        "выберите действие",
-    )
-    if contains_any(message_text, event_markers):
-        return True
-    return any("отказаться от события" in text for text, _, _ in buttons)
 
 
 class FarmerEngine:
@@ -171,147 +130,23 @@ class FarmerEngine:
                             selected_kind = "repair_step"
                             break
 
-            # Особое случайное событие «Встреча с игроком».
-            # Во время обычного фарма всегда выбираем «Ограбить», после чего
-            # следующая обработка сообщения автоматически продолжит исследование.
-            if (
-                selected is None
-                and not self.state.repair_mode
-                and (
-                    "встреча с игроком" in message_text
-                    or "вы столкнулись с" in message_text
+            if selected is None and not self.state.repair_mode:
+                selected, selected_kind = select_player_encounter_action(
+                    message_text,
+                    buttons,
                 )
-            ):
-                for button_text, row, column in buttons:
-                    if "ограбить" in button_text:
-                        selected = (
-                            button_text,
-                            row,
-                            column,
-                            "Ограбить игрока",
-                            None,
-                        )
-                        selected_kind = "player_encounter"
-                        break
 
-            # Случайные события во время исследования.
-            # Сначала выбираем безопасный выход «Отказаться от события», чтобы не тратить золото.
-            # Если такой кнопки нет, нажимаем последнюю доступную кнопку события.
-            if (
-                selected is None
-                and not self.state.repair_mode
-                and is_event_message(message_text, buttons)
-            ):
-                for button_text, row, column in buttons:
-                    if "отказаться от события" in button_text or "отказаться" in button_text:
-                        selected = (
-                            button_text,
-                            row,
-                            column,
-                            "Закрыть событие",
-                            None,
-                        )
-                        selected_kind = "event"
-                        break
-
-                if selected is None:
-                    event_buttons = [
-                        item
-                        for item in buttons
-                        if "главное меню" not in item[0]
-                        and "локации" not in item[0]
-                        and "профил" not in item[0]
-                    ]
-                    if event_buttons:
-                        button_text, row, column = event_buttons[-1]
-                        selected = (
-                            button_text,
-                            row,
-                            column,
-                            "Действие события",
-                            None,
-                        )
-                        selected_kind = "event"
+            if selected is None and not self.state.repair_mode:
+                selected, selected_kind = select_random_event_action(
+                    message_text,
+                    buttons,
+                )
 
             if selected is None and not self.state.repair_mode and self.state.target_floor is not None:
-                for button_text, row, column in buttons:
-                    if "продолжить исследование" in button_text:
-                        selected = (
-                            button_text,
-                            row,
-                            column,
-                            "Продолжить исследование",
-                            None,
-                        )
-                        selected_kind = "navigation_finish"
-                        break
-
-                if selected is None:
-                    for button_text, row, column in buttons:
-                        if "начать исследование" in button_text:
-                            selected = (
-                                button_text,
-                                row,
-                                column,
-                                "Начать исследование",
-                                None,
-                            )
-                            selected_kind = "navigation_finish"
-                            break
-
-                if selected is None:
-                    for button_text, row, column in buttons:
-                        if is_main_explore_button(button_text):
-                            selected = (
-                                button_text,
-                                row,
-                                column,
-                                "Исследовать",
-                                None,
-                            )
-                            selected_kind = "navigation"
-                            break
-
-                if selected is None:
-                    for button_text, row, column in buttons:
-                        if floor_button_matches(button_text, self.state.target_floor):
-                            selected = (
-                                button_text,
-                                row,
-                                column,
-                                f"Этаж {self.state.target_floor}",
-                                None,
-                            )
-                            selected_kind = "navigation"
-                            break
-
-                if selected is None:
-                    location_buttons = [
-                        item for item in buttons if is_exploration_location(item[0])
-                    ]
-                    if location_buttons:
-                        button_text, row, column = location_buttons[-1]
-                        selected = (
-                            button_text,
-                            row,
-                            column,
-                            "Последняя локация",
-                            None,
-                        )
-                        selected_kind = "navigation"
-
-                if selected is None:
-                    for button_text, row, column in buttons:
-                        if "главное меню" in button_text:
-                            selected = (
-                                button_text,
-                                row,
-                                column,
-                                "Главное меню",
-                                None,
-                            )
-                            selected_kind = "navigation"
-                            break
+                selected, selected_kind = select_farm_action(
+                    buttons,
+                    self.state.target_floor,
+                )
 
             if selected is None and not self.state.repair_mode:
                 for rule in STANDARD_RULES:
