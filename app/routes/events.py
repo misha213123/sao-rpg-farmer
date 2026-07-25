@@ -58,6 +58,17 @@ def select_random_event_action(
     Special events are handled before generic event detection so they work even
     when the game message does not contain the usual random-event markers.
     """
+    if "встреча с соклановцем" in message_text:
+        for button_text, row, column in buttons:
+            if "пройти мимо" in button_text:
+                return (
+                    button_text,
+                    row,
+                    column,
+                    "Пройти мимо соклановца",
+                    None,
+                ), "clanmate_encounter"
+
     if "защита границ" in message_text:
         for button_text, row, column in buttons:
             if "принять бой" in button_text:
