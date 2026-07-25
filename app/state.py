@@ -21,6 +21,7 @@ class RuntimeState:
     repair_step: int = 0
     stamina_mode: bool = False
     stamina_step: int = 0
+    stamina_route: str = ""
 
     # Ежечасные маршруты: гильдия в :35, арена в :37 по Москве.
     scheduled_mode: bool = False
@@ -46,7 +47,11 @@ class RuntimeState:
         status = "включён ✅" if self.enabled else "выключен ⛔"
         floor = str(self.target_floor) if self.target_floor is not None else "не выбран"
         repair_status = f"да, шаг {self.repair_step + 1}" if self.repair_mode else "нет"
-        stamina_status = f"да, шаг {self.stamina_step + 1}" if self.stamina_mode else "нет"
+        stamina_status = (
+            f"да, маршрут {self.stamina_route or 'не выбран'}, шаг {self.stamina_step + 1}"
+            if self.stamina_mode
+            else "нет"
+        )
         return_status = (
             f"да, шаг {self.return_to_floor_step + 1}"
             if self.return_to_floor_mode
