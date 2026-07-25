@@ -10,7 +10,12 @@ from dataclasses import dataclass
 
 
 LOGGER = logging.getLogger("sao-rpg-farmer.launcher")
-CHILD_MODULE = "app.manual_control_patch"
+
+# Start the stable runtime chain directly:
+# start_guard -> bootstrap -> mode patches -> main.
+# manual_control_patch is intentionally bypassed because it depends on brittle
+# source-text replacements and was stopping the whole service after refactors.
+CHILD_MODULE = "app.start_guard"
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,9 +116,8 @@ def main() -> int:
     try:
         children.append(_start_child(accounts[0]))
 
-        # The legacy startup applies idempotent source patches before running.
-        # Give account 1 enough time to finish that synchronous stage before
-        # account 2 starts, avoiding both processes writing the same files at once.
+        # Bootstrap still applies idempotent source patches before running.
+        # Start accounts sequentially so they never write the same files at once.
         time.sleep(8)
         if children[0].poll() is not None:
             return children[0].returncode or 1
