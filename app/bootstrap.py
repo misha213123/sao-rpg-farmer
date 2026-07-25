@@ -8,6 +8,7 @@ import runpy
 ROOT = pathlib.Path(__file__).resolve().parent
 MAIN_PATH = ROOT / "main.py"
 ENGINE_PATH = ROOT / "engine.py"
+EVENTS_PATH = ROOT / "routes" / "events.py"
 
 
 def patch_main() -> None:
@@ -24,7 +25,6 @@ def patch_main() -> None:
     source = source.replace("now_moscow.minute == 7", "now_moscow.minute == 4")
     source = source.replace("now_moscow.minute >= 10", "now_moscow.minute >= 2")
 
-    # В маршрутах учитываем только буквы, цифры и пробелы — эмодзи игнорируются.
     source = source.replace(
         '''def normalize(value: str | None) -> str:
     return " ".join((value or "").strip().lower().split())''',
@@ -117,7 +117,7 @@ def patch_main() -> None:
         source,
         count=1,
     )
-    if guild_count != 1:
+    if guild_count != 1 and "Initial guild battle started" not in source:
         raise RuntimeError("Could not patch guild route block in app/main.py")
 
     arena_replacement = '''                if state.scheduled_step == 2:
@@ -180,7 +180,7 @@ def patch_main() -> None:
         source,
         count=1,
     )
-    if arena_count != 1:
+    if arena_count != 1 and "Arena battle started: 1/5" not in source:
         raise RuntimeError("Could not patch arena route block in app/main.py")
 
     source = source.replace(
@@ -200,8 +200,6 @@ def patch_main() -> None:
                     await start_arena_route(hour_key)''',
     )
 
-    # Ловим все новые сообщения, а затем вручную и строго проверяем,
-    # что это сообщение пользователя самому себе в Saved Messages.
     source = source.replace(
         '@client.on(events.NewMessage(chats="me", outgoing=True))',
         '@client.on(events.NewMessage())',
@@ -245,13 +243,16 @@ def patch_main() -> None:
 def patch_engine() -> None:
     source = ENGINE_PATH.read_text(encoding="utf-8")
 
+    # После рефакторинга события живут в app/routes/events.py. В этом случае
+    # старый текстовый патч engine.py больше не нужен и не должен останавливать запуск.
+    if EVENTS_PATH.exists() and "select_random_event_action" in source:
+        return
+
     marker = '''            # Случайные события во время исследования.
             # Сначала выбираем безопасный выход «Отказаться от события», чтобы не тратить золото.
             # Если такой кнопки нет, нажимаем последнюю доступную кнопку события.'''
 
     clanmate_block = '''            # Особое событие «Встреча с соклановцем».
-            # Нажимаем единственную кнопку «Пройти мимо», после чего обычный
-            # маршрут исследования продолжится при обработке следующего сообщения.
             if (
                 selected is None
                 and not self.state.repair_mode
@@ -272,8 +273,6 @@ def patch_engine() -> None:
 '''
 
     border_defense_block = '''            # Особое событие «Защита границ».
-            # Принимаем бой, после чего обычный маршрут исследования продолжится
-            # при обработке следующих сообщений игры.
             if (
                 selected is None
                 and not self.state.repair_mode
