@@ -65,6 +65,8 @@ def patch_main() -> None:
                 "4": "semi_auto",
                 "полуавтоматический фарм": "semi_auto",
                 "полуавтомат": "semi_auto",
+                "5": "fishing",
+                "рыбалка": "fishing",
             }
             selected_mode = mode_by_choice.get(choice)
             if selected_mode is None:
@@ -73,7 +75,8 @@ def patch_main() -> None:
                     "1 — Обычный фарм\\n"
                     "2 — Обычный фарм + Арена + Гильдейский зачёт\\n"
                     "3 — Только Арена + Гильдейский зачёт\\n"
-                    "4 — Полуавтоматический фарм"
+                    "4 — Полуавтоматический фарм\\n"
+                    "5 — Рыбалка"
                 )
                 return
 
@@ -93,6 +96,19 @@ def patch_main() -> None:
                     "Режим включён: Арена + Гильдейский зачёт ✅\\n"
                     "Обычный фарм отключён."
                 )
+                return
+
+            if selected_mode == "fishing":
+                state.enabled = True
+                state.awaiting_floor = False
+                state.target_floor = None
+                state.return_to_floor_mode = False
+                state.repair_mode = False
+                await event.reply(
+                    "Режим включён: Рыбалка 🎣\\n"
+                    "Перехожу: /start → Локации → Рыбалка → Забросить удочку."
+                )
+                await client.send_message(game_bot, "/start")
                 return
 
             state.enabled = False
@@ -137,8 +153,9 @@ def patch_main() -> None:
                 "1 — Обычный фарм\\n"
                 "2 — Обычный фарм + Арена + Гильдейский зачёт\\n"
                 "3 — Только Арена + Гильдейский зачёт\\n"
-                "4 — Полуавтоматический фарм\\n\\n"
-                "Ответь цифрой: 1, 2, 3 или 4"
+                "4 — Полуавтоматический фарм\\n"
+                "5 — Рыбалка\\n\\n"
+                "Ответь цифрой: 1, 2, 3, 4 или 5"
             )
 '''
     source = on_pattern.sub(lambda _match: on_replacement, source, count=1)
@@ -207,6 +224,8 @@ def patch_all() -> None:
     patch_state()
     patch_main()
 
+    from app.fishing_patch import patch_all as patch_fishing
     from app.random_schedule_patch import patch_all as patch_random_schedule
 
+    patch_fishing()
     patch_random_schedule()
