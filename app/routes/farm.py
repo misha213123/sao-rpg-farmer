@@ -1,15 +1,115 @@
 from __future__ import annotations
 
-from app.routes.base import find_button
+from typing import TypeAlias
+
+ButtonInfo: TypeAlias = tuple[str, int, int]
+RouteAction: TypeAlias = tuple[str, int, int, str, str | None]
 
 
-FARM_CONTINUE_MARKERS = ("продолжить исследование",)
-FARM_START_MARKERS = ("исследовать",)
+def floor_button_matches(button_text: str, floor: int) -> bool:
+    """Match the configured floor without confusing it with other numbers."""
+    compact = button_text.replace("№", " ").replace("-", " ")
+    tokens = compact.split()
+    floor_text = str(floor)
+    return (
+        button_text == floor_text
+        or f"этаж {floor_text}" in button_text
+        or f"{floor_text} этаж" in button_text
+        or floor_text in tokens
+    )
 
 
-def find_continue_button(message):
-    return find_button(message, FARM_CONTINUE_MARKERS)
+def is_exploration_location(button_text: str) -> bool:
+    """Return True only for a location inside the selected floor."""
+    if "назад" in button_text:
+        return False
+    if "локация" not in button_text:
+        return False
+    if button_text.startswith("локации") or " локации" in button_text:
+        return False
+    return True
 
 
-def find_start_button(message):
-    return find_button(message, FARM_START_MARKERS)
+def is_main_explore_button(button_text: str) -> bool:
+    """Match the main-menu Explore button, including decorative emoji."""
+    return (
+        "исследовать" in button_text
+        and "продолжить" not in button_text
+        and "начать" not in button_text
+        and "исследование" not in button_text
+    )
+
+
+def select_farm_action(
+    buttons: list[ButtonInfo],
+    target_floor: int,
+) -> tuple[RouteAction | None, str | None]:
+    """Select the next action of the existing ordinary farming route.
+
+    Priority is intentionally identical to the former engine implementation:
+    continue -> start -> Explore -> floor -> last location -> main menu.
+    """
+    for button_text, row, column in buttons:
+        if "продолжить исследование" in button_text:
+            return (
+                button_text,
+                row,
+                column,
+                "Продолжить исследование",
+                None,
+            ), "navigation_finish"
+
+    for button_text, row, column in buttons:
+        if "начать исследование" in button_text:
+            return (
+                button_text,
+                row,
+                column,
+                "Начать исследование",
+                None,
+            ), "navigation_finish"
+
+    for button_text, row, column in buttons:
+        if is_main_explore_button(button_text):
+            return (
+                button_text,
+                row,
+                column,
+                "Исследовать",
+                None,
+            ), "navigation"
+
+    for button_text, row, column in buttons:
+        if floor_button_matches(button_text, target_floor):
+            return (
+                button_text,
+                row,
+                column,
+                f"Этаж {target_floor}",
+                None,
+            ), "navigation"
+
+    location_buttons = [
+        item for item in buttons if is_exploration_location(item[0])
+    ]
+    if location_buttons:
+        button_text, row, column = location_buttons[-1]
+        return (
+            button_text,
+            row,
+            column,
+            "Последняя локация",
+            None,
+        ), "navigation"
+
+    for button_text, row, column in buttons:
+        if "главное меню" in button_text:
+            return (
+                button_text,
+                row,
+                column,
+                "Главное меню",
+                None,
+            ), "navigation"
+
+    return None, None
