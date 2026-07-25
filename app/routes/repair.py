@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from app.rules import WORN_EQUIPMENT_MARKERS
 from app.state import RuntimeState
 
 ButtonInfo = tuple[str, int, int]
 SelectedAction = tuple[str, int, int, str, str | None]
+
+WORN_EQUIPMENT_MARKERS = (
+    "снаряжение изношено",
+    "почините предметы в кузнице",
+)
 
 # Строгий маршрут починки:
 # Главное меню -> Локации -> Кузница -> Починка
