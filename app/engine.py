@@ -15,6 +15,7 @@ from app.routes.events import (
     select_random_event_action,
 )
 from app.routes.farm import select_farm_action
+from app.routes.semi_auto import select_semi_auto_action
 from app.routes.stamina import (
     reset_stamina_route,
     select_stamina_action,
@@ -99,7 +100,25 @@ class FarmerEngine:
             selected: SelectedAction | None = None
             selected_kind: str | None = None
 
-            if contains_any(message_text, WORN_EQUIPMENT_MARKERS):
+            # Полуавтоматический режим полностью изолирован от обычных правил.
+            # Он использует только бой, «Продолжить исследование», ограбление игрока
+            # и существующий маршрут починки. Стамина и события остаются ручными.
+            if getattr(self.state, "automation_mode", "") == "semi_auto":
+                selected, selected_kind = select_semi_auto_action(
+                    message_text,
+                    all_buttons,
+                    self.state,
+                )
+                if selected is None:
+                    logger.info(
+                        "Semi-auto waiting for manual action. kind=%s buttons=%s",
+                        selected_kind,
+                        [text for text, _, _ in all_buttons],
+                    )
+                    self.state.last_signature = signature
+                    return False
+
+            if selected is None and contains_any(message_text, WORN_EQUIPMENT_MARKERS):
                 if not self.state.repair_mode:
                     logger.info("Worn equipment detected; starting repair flow")
                 self.state.repair_mode = True
