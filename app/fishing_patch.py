@@ -29,6 +29,25 @@ def patch_engine() -> None:
                 selected, selected_kind = select_fishing_action(
                     message_text,
                     all_buttons,
+                    self.state,
+                )
+                if selected is None:
+                    logger.info(
+                        "Fishing waiting. kind=%s buttons=%s text=%s",
+                        selected_kind,
+                        [text for text, _, _ in all_buttons],
+                        message_text,
+                    )
+                    self.state.last_signature = signature
+                    return False
+
+'''
+    old_fishing_block_with_stats = '''            # Рыбалка полностью изолирована от фарма, событий и расписания.
+            if getattr(self.state, "automation_mode", "") == "fishing":
+                record_fishing_result(message_text, self.state)
+                selected, selected_kind = select_fishing_action(
+                    message_text,
+                    all_buttons,
                 )
                 if selected is None:
                     logger.info(
@@ -59,7 +78,9 @@ def patch_engine() -> None:
 
 '''
     semi_auto_anchor = "            # Полуавтоматический режим полностью изолирован от обычных правил.\n"
-    if old_fishing_block in source:
+    if old_fishing_block_with_stats in source:
+        source = source.replace(old_fishing_block_with_stats, fishing_block, 1)
+    elif old_fishing_block in source:
         source = source.replace(old_fishing_block, fishing_block, 1)
     elif "Fishing waiting. kind=%s" not in source and semi_auto_anchor in source:
         source = source.replace(
