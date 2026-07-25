@@ -19,6 +19,8 @@ class RuntimeState:
     repairs: int = 0
     repair_mode: bool = False
     repair_step: int = 0
+    stamina_mode: bool = False
+    stamina_step: int = 0
 
     # Ежечасные маршруты: гильдия в :35, арена в :37 по Москве.
     scheduled_mode: bool = False
@@ -44,6 +46,7 @@ class RuntimeState:
         status = "включён ✅" if self.enabled else "выключен ⛔"
         floor = str(self.target_floor) if self.target_floor is not None else "не выбран"
         repair_status = f"да, шаг {self.repair_step + 1}" if self.repair_mode else "нет"
+        stamina_status = f"да, шаг {self.stamina_step + 1}" if self.stamina_mode else "нет"
         return_status = (
             f"да, шаг {self.return_to_floor_step + 1}"
             if self.return_to_floor_mode
@@ -64,6 +67,7 @@ class RuntimeState:
             f"Сокровищ: {self.treasures}\n"
             f"Починок: {self.repairs}\n"
             f"Режим починки: {repair_status}\n"
+            f"Восстановление стамины: {stamina_status}\n"
             f"Возврат на этаж: {return_status}\n"
             f"Маршрут :35/:37 МСК: {scheduled_status}\n"
             f"Подтверждений атаки: {self.scheduled_confirm_clicks}\n"
