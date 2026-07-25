@@ -53,11 +53,22 @@ def select_random_event_action(
     message_text: str,
     buttons: list[ButtonInfo],
 ) -> tuple[RouteAction | None, str | None]:
-    """Select the same random-event action previously implemented in engine.
+    """Select an action for blocking exploration events.
 
-    Prefer refusing the event. When that button does not exist, use the last
-    safe event button while excluding navigation, Locations, and Profile.
+    Special events are handled before generic event detection so they work even
+    when the game message does not contain the usual random-event markers.
     """
+    if "защита границ" in message_text:
+        for button_text, row, column in buttons:
+            if "принять бой" in button_text:
+                return (
+                    button_text,
+                    row,
+                    column,
+                    "Принять бой на защите границ",
+                    None,
+                ), "border_defense"
+
     if not is_event_message(message_text, buttons):
         return None, None
 
