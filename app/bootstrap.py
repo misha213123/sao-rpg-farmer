@@ -7,14 +7,11 @@ import runpy
 
 ROOT = pathlib.Path(__file__).resolve().parent
 MAIN_PATH = ROOT / "main.py"
-ENGINE_PATH = ROOT / "engine.py"
-EVENTS_PATH = ROOT / "routes" / "events.py"
 
 
 def patch_main() -> None:
     source = MAIN_PATH.read_text(encoding="utf-8")
 
-    # Подключаем отдельный модуль Арены в итоговый runtime-код main.py.
     arena_import = (
         "from app.routes.arena import ARENA_MAX_BATTLES, "
         "select_battle_button, should_finish_arena\n"
@@ -26,8 +23,20 @@ def patch_main() -> None:
             1,
         )
 
-    # Каноническое расписание по московскому времени:
-    # :02 — арена, :04 — гильдейский зачёт.
+    guild_import = '''from app.routes.guild import (
+    GUILD_MAX_BATTLES,
+    GUILD_ROUTE_STEPS,
+    select_combat_button,
+    select_confirm_button,
+    select_repeat_button,
+    select_route_button,
+    should_finish_guild,
+)
+'''
+    if "from app.routes.guild import" not in source:
+        anchor = arena_import if arena_import in source else "from app.engine import FarmerEngine\n"
+        source = source.replace(anchor, anchor + guild_import, 1)
+
     source = source.replace(":07 —", ":04 —")
     source = source.replace(":10 —", ":02 —")
     source = source.replace("at :07 MSK", "at :04 MSK")
@@ -46,20 +55,57 @@ def patch_main() -> None:
         1,
     )
 
-    guild_replacement = '''                if state.scheduled_step == 6:
-                    no_guild_attacks = (
-                        "осталось атак в этом часе 0" in message_text
-                        or "осталось в этом часе 0 атак" in message_text
-                        or "осталось 0 атак" in message_text
-                        or ("0 атак" in message_text and "остал" in message_text)
-                        or "нет доступных атак" in message_text
-                        or "атаки исчерпаны" in message_text
-                        or "лимит pvp боев исчерпан" in message_text
-                        or "лимит pvp боёв исчерпан" in message_text
-                        or ("лимит" in message_text and "исчерпан" in message_text)
+    guild_steps_replacement = '''                if state.scheduled_step in GUILD_ROUTE_STEPS:
+                    route_button = select_route_button(buttons, state.scheduled_step)
+                    if route_button is not None:
+                        button_text, row, column = route_button
+                        await asyncio.sleep(1.0)
+                        await message.click(i=row, j=column)
+                        logger.info(
+                            "Guild route clicked: %s (step=%s)",
+                            button_text,
+                            state.scheduled_step,
+                        )
+                        state.scheduled_step += 1
+                        state.last_signature = None
+                        return True
+                    if state.scheduled_step == 1:
+                        for text, row, column in buttons:
+                            if "главное меню" in text:
+                                await asyncio.sleep(1.0)
+                                await message.click(i=row, j=column)
+                                return True
+                    logger.info(
+                        "Guild route waiting for step %s; buttons=%s",
+                        state.scheduled_step,
+                        texts,
                     )
-                    if no_guild_attacks:
-                        logger.info("Guild attacks exhausted; sending /start and returning to farming")
+                    return True
+
+'''
+    if "select_route_button(buttons" not in source:
+        guild_steps_pattern = re.compile(
+            r"                route_steps: dict\[int, tuple\[str, \.\.\.\]\] = \{.*?"
+            r"                    return True\n\n"
+            r"                if state\.scheduled_step == 6:",
+            re.DOTALL,
+        )
+        source = guild_steps_pattern.sub(
+            guild_steps_replacement + "                if state.scheduled_step == 6:",
+            source,
+            count=1,
+        )
+
+    guild_replacement = '''                if state.scheduled_step == 6:
+                    if should_finish_guild(
+                        message_text,
+                        state.scheduled_confirm_clicks,
+                    ):
+                        logger.info(
+                            "Guild completed or exhausted at %s/%s; sending /start and returning to farming",
+                            state.scheduled_confirm_clicks,
+                            GUILD_MAX_BATTLES,
+                        )
                         state.scheduled_mode = False
                         state.scheduled_phase = ""
                         state.scheduled_step = 0
@@ -69,68 +115,65 @@ def patch_main() -> None:
                         return True
 
                     if state.scheduled_confirm_clicks == 0:
-                        if await click_matching(message, ("подтвердить атаку",)):
+                        confirm_button = select_confirm_button(buttons)
+                        if confirm_button is not None:
+                            button_text, row, column = confirm_button
+                            await asyncio.sleep(1.0)
+                            await message.click(i=row, j=column)
                             state.scheduled_confirm_clicks = 1
                             state.last_signature = None
-                            logger.info("Initial guild battle started: 1/10")
-                            return True
-
-                    for combat_markers in (
-                        ("скрытая атака",),
-                        ("удар 2 рук",),
-                        ("обычная атака",),
-                    ):
-                        if await click_matching(message, combat_markers):
-                            state.last_signature = None
-                            return True
-
-                    if state.scheduled_confirm_clicks < 10:
-                        repeated = await click_matching(
-                            message, ("ещё раз", "agrognomiki")
-                        )
-                        if not repeated:
-                            repeated = await click_matching(
-                                message, ("еще раз", "agrognomiki")
+                            logger.info(
+                                "Initial guild battle started: 1/%s (button=%s)",
+                                GUILD_MAX_BATTLES,
+                                button_text,
                             )
-                        if repeated:
+                            return True
+
+                    combat_button = select_combat_button(buttons)
+                    if combat_button is not None:
+                        button_text, row, column = combat_button
+                        await asyncio.sleep(1.0)
+                        await message.click(i=row, j=column)
+                        state.last_signature = None
+                        logger.info("Guild combat action: %s", button_text)
+                        return True
+
+                    if state.scheduled_confirm_clicks < GUILD_MAX_BATTLES:
+                        repeat_button = select_repeat_button(buttons)
+                        if repeat_button is not None:
+                            button_text, row, column = repeat_button
+                            await asyncio.sleep(1.0)
+                            await message.click(i=row, j=column)
                             state.scheduled_confirm_clicks += 1
                             state.last_signature = None
                             logger.info(
-                                "Guild battle started: %s/10",
+                                "Guild battle started: %s/%s (button=%s)",
                                 state.scheduled_confirm_clicks,
+                                GUILD_MAX_BATTLES,
+                                button_text,
                             )
                             return True
 
-                    if state.scheduled_confirm_clicks >= 10:
-                        logger.info("Ten guild battles completed; sending /start and returning to farming")
-                        state.scheduled_mode = False
-                        state.scheduled_phase = ""
-                        state.scheduled_step = 0
-                        state.return_to_floor_mode = state.target_floor is not None
-                        state.last_signature = None
-                        await client.send_message(game_bot, "/start")
-                        return True
-
                     logger.info(
-                        "Waiting for guild combat/repeat/exhaustion; buttons=%s text=%s",
+                        "Waiting for guild combat/repeat/exhaustion (%s/%s); buttons=%s text=%s",
+                        state.scheduled_confirm_clicks,
+                        GUILD_MAX_BATTLES,
                         texts,
                         message_text,
                     )
                     return True
 
 '''
-
-    guild_pattern = re.compile(
-        r"                if state\.scheduled_step == 6:\n.*?\n            if state\.scheduled_phase == \"arena\":",
-        re.DOTALL,
-    )
-    source, guild_count = guild_pattern.subn(
-        guild_replacement + '            if state.scheduled_phase == "arena":',
-        source,
-        count=1,
-    )
-    if guild_count != 1 and "Initial guild battle started" not in source:
-        raise RuntimeError("Could not patch guild route block in app/main.py")
+    if "select_confirm_button(buttons)" not in source:
+        guild_pattern = re.compile(
+            r"                if state\.scheduled_step == 6:\n.*?\n            if state\.scheduled_phase == \"arena\":",
+            re.DOTALL,
+        )
+        source = guild_pattern.sub(
+            guild_replacement + '            if state.scheduled_phase == "arena":',
+            source,
+            count=1,
+        )
 
     arena_replacement = '''                if state.scheduled_step == 2:
                     if should_finish_arena(
@@ -168,18 +211,16 @@ def patch_main() -> None:
                     return True
 
 '''
-
-    arena_pattern = re.compile(
-        r"                if state\.scheduled_step == 2:\n.*?\n            logger\.warning\(",
-        re.DOTALL,
-    )
-    source, arena_count = arena_pattern.subn(
-        arena_replacement + "            logger.warning(",
-        source,
-        count=1,
-    )
-    if arena_count != 1 and "select_battle_button(" not in source:
-        raise RuntimeError("Could not patch arena route block in app/main.py")
+    if "select_battle_button(" not in source:
+        arena_pattern = re.compile(
+            r"                if state\.scheduled_step == 2:\n.*?\n            logger\.warning\(",
+            re.DOTALL,
+        )
+        source = arena_pattern.sub(
+            arena_replacement + "            logger.warning(",
+            source,
+            count=1,
+        )
 
     source = source.replace(
         '''                if (
@@ -211,99 +252,23 @@ def patch_main() -> None:
 
     plain_handler = '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
         raw = (event.raw_text or "").strip()'''
-    old_checked_handler = '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
-        event_chat_id = getattr(event, "chat_id", None)
-        peer_id = getattr(event.message, "peer_id", None)
-        peer_user_id = getattr(peer_id, "user_id", None)
-        if event_chat_id != me.id and peer_user_id != me.id:
-            return
-        raw = (event.raw_text or "").strip()'''
     robust_handler = '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
         event_chat_id = getattr(event, "chat_id", None)
         sender_id = getattr(event, "sender_id", None)
         peer_id = getattr(event.message, "peer_id", None)
         peer_user_id = getattr(peer_id, "user_id", None)
-        is_saved_messages = (
-            event_chat_id == me.id
-            or peer_user_id == me.id
-        )
+        is_saved_messages = event_chat_id == me.id or peer_user_id == me.id
         is_own_message = sender_id == me.id or getattr(event.message, "out", False)
         if not is_saved_messages or not is_own_message:
             return
         raw = (event.raw_text or "").strip()
         logger.info("Saved Messages input received: %r", raw)'''
-    source = source.replace(old_checked_handler, robust_handler, 1)
-    source = source.replace(plain_handler, robust_handler, 1)
+    if "Saved Messages input received" not in source:
+        source = source.replace(plain_handler, robust_handler, 1)
 
     MAIN_PATH.write_text(source, encoding="utf-8")
 
 
-def patch_engine() -> None:
-    source = ENGINE_PATH.read_text(encoding="utf-8")
-
-    # После рефакторинга события живут в app/routes/events.py. В этом случае
-    # старый текстовый патч engine.py больше не нужен и не должен останавливать запуск.
-    if EVENTS_PATH.exists() and "select_random_event_action" in source:
-        return
-
-    marker = '''            # Случайные события во время исследования.
-            # Сначала выбираем безопасный выход «Отказаться от события», чтобы не тратить золото.
-            # Если такой кнопки нет, нажимаем последнюю доступную кнопку события.'''
-
-    clanmate_block = '''            # Особое событие «Встреча с соклановцем».
-            if (
-                selected is None
-                and not self.state.repair_mode
-                and "встреча с соклановцем" in message_text
-            ):
-                for button_text, row, column in buttons:
-                    if "пройти мимо" in button_text:
-                        selected = (
-                            button_text,
-                            row,
-                            column,
-                            "Пройти мимо соклановца",
-                            None,
-                        )
-                        selected_kind = "clanmate_encounter"
-                        break
-
-'''
-
-    border_defense_block = '''            # Особое событие «Защита границ».
-            if (
-                selected is None
-                and not self.state.repair_mode
-                and "защита границ" in message_text
-            ):
-                for button_text, row, column in buttons:
-                    if "принять бой" in button_text:
-                        selected = (
-                            button_text,
-                            row,
-                            column,
-                            "Принять бой на защите границ",
-                            None,
-                        )
-                        selected_kind = "border_defense"
-                        break
-
-'''
-
-    if "Пройти мимо соклановца" not in source:
-        if marker not in source:
-            raise RuntimeError("Could not patch clanmate encounter in app/engine.py")
-        source = source.replace(marker, clanmate_block + marker, 1)
-
-    if "Принять бой на защите границ" not in source:
-        if marker not in source:
-            raise RuntimeError("Could not patch border defense event in app/engine.py")
-        source = source.replace(marker, border_defense_block + marker, 1)
-
-    ENGINE_PATH.write_text(source, encoding="utf-8")
-
-
-patch_engine()
 patch_main()
 
 from app.mode_selection_patch import patch_all
