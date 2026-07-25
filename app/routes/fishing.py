@@ -25,6 +25,21 @@ CATCH_MARKERS = (
     "предмет",
 )
 
+# Признаки того, что после Ниджи уже появилась новая настоящая поклёвка.
+NEW_BITE_MARKERS = (
+    "глубинное зрение",
+    "поплавок пошёл под воду",
+    "поплавок пошел под воду",
+    "удочка задрожала",
+    "что-то на крючке",
+    "что то на крючке",
+    "что-то блестящее",
+    "что то блестящее",
+    "есть движение",
+    "вода заколыхалась",
+    "к крючку подплывает",
+)
+
 CHECK_ROD_MARKERS = ("проверить удочку",)
 PULL_ROD_MARKERS = ("вытащить удочку",)
 CAST_ROD_MARKERS = ("забросить удочку",)
@@ -108,6 +123,7 @@ def record_fishing_result(message_text: str, state: RuntimeState) -> None:
 def select_fishing_action(
     message_text: str,
     buttons: list[ButtonInfo],
+    state: RuntimeState,
 ) -> tuple[SelectedAction | None, str | None]:
     """Выбирает только действия отдельного режима рыбалки.
 
@@ -118,13 +134,23 @@ def select_fishing_action(
     - рыба, сундук, предмет или неизвестное событие -> Проверить удочку;
     - мусор -> Вытащить удочку;
     - после результата -> Забросить удочку;
-    - просьба Ниджи -> Дать наживку и продолжить ожидание.
+    - просьба Ниджи -> Дать наживку и ждать новую поклёвку.
     """
+    # Событие Ниджи имеет самый высокий приоритет.
     if contains_any(message_text, NIJI_MESSAGE_MARKERS):
         give_bait = find_button(buttons, GIVE_BAIT_MARKERS)
         if give_bait is not None:
+            state.fishing_waiting_after_niji = True
             return make_action(give_bait, "Дать наживку Ниджи", "fishing_give_bait")
         return None, "fishing_wait_niji"
+
+    # После передачи наживки не трогаем кнопку «Проверить удочку», пока игра
+    # не покажет новую реальную поклёвку отдельным сообщением или обновлением.
+    if state.fishing_waiting_after_niji:
+        if contains_any(message_text, NEW_BITE_MARKERS):
+            state.fishing_waiting_after_niji = False
+        else:
+            return None, "fishing_wait_after_niji"
 
     if "глубинное зрение" in message_text and contains_any(message_text, TRASH_MARKERS):
         pull_rod = find_button(buttons, PULL_ROD_MARKERS)
@@ -150,10 +176,15 @@ def select_fishing_action(
     if locations is not None:
         return make_action(locations, "Локации", "fishing_navigation")
 
-    # Для неизвестного события рыбалки используем безопасный общий вариант.
-    if "удочка заброшена" not in message_text:
+    # Для неизвестного события рыбалки используем общий вариант, но только
+    # после появления признака новой поклёвки.
+    if contains_any(message_text, NEW_BITE_MARKERS):
         check_rod = find_button(buttons, CHECK_ROD_MARKERS)
         if check_rod is not None:
-            return make_action(check_rod, "Проверить удочку: неизвестное событие", "fishing_check")
+            return make_action(
+                check_rod,
+                "Проверить удочку: неизвестное событие",
+                "fishing_check",
+            )
 
     return None, "fishing_wait"
