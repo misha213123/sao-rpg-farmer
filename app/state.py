@@ -47,6 +47,9 @@ class RuntimeState:
     fishing_epic: int = 0
     fishing_legendary: int = 0
 
+    # После передачи наживки Ниджи ждём новую поклёвку и не проверяем удочку сразу.
+    fishing_waiting_after_niji: bool = False
+
     last_action: str = "—"
     last_message_id: int | None = None
     last_signature: str | None = None
