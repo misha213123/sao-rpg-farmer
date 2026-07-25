@@ -5,6 +5,8 @@ from collections.abc import Iterable
 from app.routes.base import find_button, has_text
 
 
+ButtonInfo = tuple[str, int, int]
+
 ARENA_MENU_MARKERS = ("арена", "pvp")
 ARENA_FIRST_BATTLE_MARKERS = ("рандомный бой",)
 ARENA_REPEAT_MARKERS = ("ещё бой", "еще бой")
@@ -45,6 +47,18 @@ def battle_button_markers(battle_clicks: int) -> tuple[str, ...]:
     if battle_clicks == 0:
         return ARENA_FIRST_BATTLE_MARKERS
     return ARENA_REPEAT_MARKERS
+
+
+def select_battle_button(
+    buttons: list[ButtonInfo],
+    battle_clicks: int,
+) -> ButtonInfo | None:
+    """Return the exact arena battle button for the current fight number."""
+    markers = battle_button_markers(battle_clicks)
+    for button_text, row, column in buttons:
+        if contains_any(button_text, markers):
+            return button_text, row, column
+    return None
 
 
 def find_arena_menu(message):
