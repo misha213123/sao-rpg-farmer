@@ -14,7 +14,11 @@ from app.routes.events import (
     select_random_event_action,
 )
 from app.routes.farm import select_farm_action
-from app.routes.stamina import FALLBACK_FLOW, select_stamina_action
+from app.routes.stamina import (
+    reset_stamina_route,
+    select_stamina_action,
+    stamina_flow_length,
+)
 from app.rules import (
     NEVER_CLICK,
     REPAIR_FLOW,
@@ -102,8 +106,8 @@ class FarmerEngine:
                 self.state.return_to_floor_mode = False
 
             if selected is None:
-                # Stamina receives all buttons because the fallback route must be
-                # allowed to use the explicit "Назад в исследование" button.
+                # Stamina receives every button, including the normally forbidden
+                # battle button "Зелья" and the explicit return button.
                 selected, selected_kind = select_stamina_action(
                     message_text,
                     all_buttons,
@@ -112,7 +116,8 @@ class FarmerEngine:
 
             if selected is None and selected_kind == "stamina_wait":
                 logger.info(
-                    "Waiting for stamina route step %s; buttons=%s",
+                    "Waiting for stamina route=%s step=%s; buttons=%s",
+                    self.state.stamina_route,
                     self.state.stamina_step + 1,
                     [text for text, _, _ in all_buttons],
                 )
@@ -146,7 +151,11 @@ class FarmerEngine:
                     buttons,
                 )
 
-            if selected is None and not self.state.repair_mode and self.state.target_floor is not None:
+            if (
+                selected is None
+                and not self.state.repair_mode
+                and self.state.target_floor is not None
+            ):
                 selected, selected_kind = select_farm_action(
                     buttons,
                     self.state.target_floor,
@@ -170,10 +179,11 @@ class FarmerEngine:
 
             if selected is None:
                 logger.info(
-                    "No matching action. repair_mode=%s, repair_step=%s, stamina_mode=%s, stamina_step=%s, floor=%s, buttons=%s",
+                    "No matching action. repair_mode=%s, repair_step=%s, stamina_mode=%s, stamina_route=%s, stamina_step=%s, floor=%s, buttons=%s",
                     self.state.repair_mode,
                     self.state.repair_step,
                     self.state.stamina_mode,
+                    self.state.stamina_route,
                     self.state.stamina_step,
                     self.state.target_floor,
                     [text for text, _, _ in all_buttons],
@@ -221,13 +231,16 @@ class FarmerEngine:
 
             if selected_kind == "stamina_step":
                 self.state.stamina_step += 1
-                if self.state.stamina_step >= len(FALLBACK_FLOW):
-                    self.state.stamina_mode = False
-                    self.state.stamina_step = 0
-                    self.state.return_to_floor_mode = self.state.target_floor is not None
+                if self.state.stamina_step >= stamina_flow_length(self.state):
+                    completed_route = self.state.stamina_route
+                    reset_stamina_route(self.state)
+                    if completed_route == "exploration":
+                        self.state.return_to_floor_mode = (
+                            self.state.target_floor is not None
+                        )
                     logger.info(
-                        "Fallback stamina restoration completed; returning to exploration on floor %s",
-                        self.state.target_floor,
+                        "Stamina restoration completed via %s route",
+                        completed_route,
                     )
 
             elif selected_kind == "repair_step":
