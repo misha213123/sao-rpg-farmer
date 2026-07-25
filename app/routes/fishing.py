@@ -22,6 +22,14 @@ CATCH_MARKERS = (
     "предмет",
 )
 
+# После обычного заброса кнопка «Проверить удочку» уже видна, но нажимать её
+# нельзя, пока игра прямо говорит ждать клёва.
+WAITING_AFTER_CAST_MARKERS = (
+    "удочка заброшена",
+    "жди клёва",
+    "жди клева",
+)
+
 CHECK_ROD_MARKERS = ("проверить удочку",)
 PULL_ROD_MARKERS = ("вытащить удочку",)
 CAST_ROD_MARKERS = ("забросить удочку",)
@@ -68,9 +76,10 @@ def select_fishing_action(
     /start -> Локации -> Рыбалка -> Забросить удочку.
 
     Цикл:
-    - рыба, сундук или предмет -> Проверить удочку -> Забросить удочку;
+    - известная или неизвестная поклёвка -> Проверить удочку -> Забросить удочку;
     - мусор -> Вытащить удочку -> Забросить удочку;
-    - просьба Ниджи -> Дать наживку и продолжить ожидание.
+    - просьба Ниджи -> Дать наживку и продолжить ожидание;
+    - сразу после заброса ничего не нажимать до появления нового события.
     """
     # Событие Ниджи имеет самый высокий приоритет.
     if contains_any(message_text, NIJI_MESSAGE_MARKERS):
@@ -86,12 +95,26 @@ def select_fishing_action(
             return make_action(pull_rod, "Вытащить удочку: мусор", "fishing_pull_trash")
         return None, "fishing_wait_trash"
 
-    # Рыбу любой редкости, сундук и предмет забираем через проверку удочки.
+    # Известную рыбу, сундук и предмет забираем через проверку удочки.
     if "глубинное зрение" in message_text and contains_any(message_text, CATCH_MARKERS):
         check_rod = find_button(buttons, CHECK_ROD_MARKERS)
         if check_rod is not None:
             return make_action(check_rod, "Проверить удочку", "fishing_check")
         return None, "fishing_wait_catch"
+
+    # Сразу после заброса кнопка проверки уже присутствует, но здесь ждём клёва.
+    if contains_any(message_text, WAITING_AFTER_CAST_MARKERS):
+        return None, "fishing_wait_bite"
+
+    # Запасное правило для любых новых и неизвестных событий рыбалки:
+    # если игра предлагает «Проверить удочку», нажимаем её.
+    check_rod = find_button(buttons, CHECK_ROD_MARKERS)
+    if check_rod is not None:
+        return make_action(
+            check_rod,
+            "Проверить удочку: неизвестное событие",
+            "fishing_check_fallback",
+        )
 
     # После улова или вытаскивания мусора снова забрасываем удочку.
     cast_rod = find_button(buttons, CAST_ROD_MARKERS)
@@ -107,5 +130,4 @@ def select_fishing_action(
     if locations is not None:
         return make_action(locations, "Локации", "fishing_navigation")
 
-    # При обычном ожидании поклёвки ничего не нажимаем.
     return None, "fishing_wait"
