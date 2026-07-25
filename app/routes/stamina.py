@@ -19,13 +19,18 @@ EXPLORATION_FLOW: tuple[tuple[tuple[str, ...], str, str | None], ...] = (
     (("назад в исследование", "назад"), "Назад в исследование", None),
 )
 
+# Чёткий маршрут восстановления стамины во время боя с боссом:
+# Зелья -> След -> Использовать Восстановление стамины
+# -> Назад в исследование -> продолжить бой обычными боевыми правилами.
 BATTLE_FLOW: tuple[tuple[tuple[str, ...], str, str | None], ...] = (
     (("зелья",), "Открыть зелья в бою", None),
+    (("след",), "След в меню зелий", None),
     (
-        STAMINA_BUTTON_MARKERS,
-        "Выпить зелье стамины в бою",
-        "stamina_potions",
+        ("использовать восстановление стамины", "восстановление стамины"),
+        "Использовать восстановление стамины в бою",
+        None,
     ),
+    (("назад в исследование", "назад"), "Назад к бою с боссом", None),
 )
 
 
@@ -50,7 +55,7 @@ def select_stamina_action(
     buttons: list[ButtonInfo],
     state: RuntimeState,
 ) -> tuple[SelectedAction | None, str | None]:
-    """Choose quick potion, exploration recovery, or boss-battle potion route."""
+    """Choose quick potion, exploration recovery, or boss-battle recovery route."""
     low_resource = contains_any(message_text, LOW_RESOURCE_MARKERS)
 
     if low_resource and not state.stamina_mode:
