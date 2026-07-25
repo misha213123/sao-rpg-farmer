@@ -14,6 +14,18 @@ EVENTS_PATH = ROOT / "routes" / "events.py"
 def patch_main() -> None:
     source = MAIN_PATH.read_text(encoding="utf-8")
 
+    # Подключаем отдельный модуль Арены в итоговый runtime-код main.py.
+    arena_import = (
+        "from app.routes.arena import ARENA_MAX_BATTLES, "
+        "select_battle_button, should_finish_arena\n"
+    )
+    if "from app.routes.arena import" not in source:
+        source = source.replace(
+            "from app.engine import FarmerEngine\n",
+            "from app.engine import FarmerEngine\n" + arena_import,
+            1,
+        )
+
     # Каноническое расписание по московскому времени:
     # :02 — арена, :04 — гильдейский зачёт.
     source = source.replace(":07 —", ":04 —")
@@ -121,49 +133,35 @@ def patch_main() -> None:
         raise RuntimeError("Could not patch guild route block in app/main.py")
 
     arena_replacement = '''                if state.scheduled_step == 2:
-                    arena_exhausted = (
-                        ("5/5" in message_text and "бо" in message_text)
-                        or "использовано 5/5" in message_text
-                        or "рандомных боев использовано 5/5" in message_text
-                        or "рандомных боёв использовано 5/5" in message_text
-                        or "достигли лимита рандомных боев" in message_text
-                        or "достигли лимита рандомных боёв" in message_text
-                        or "лимит 5 боев в час" in message_text
-                        or "лимит 5 боёв в час" in message_text
-                        or "лимит pvp боев исчерпан" in message_text
-                        or "лимит pvp боёв исчерпан" in message_text
-                    )
-                    if arena_exhausted:
+                    if should_finish_arena(
+                        message_text,
+                        state.scheduled_arena_clicks,
+                    ):
                         await finish_arena_route()
                         return True
 
-                    if state.scheduled_arena_clicks == 0:
-                        if await click_matching(message, ("рандомный бой",)):
-                            state.scheduled_arena_clicks = 1
-                            state.last_signature = None
-                            logger.info("Arena battle started: 1/5")
-                            return True
-
-                    if state.scheduled_arena_clicks < 5:
-                        repeated = await click_matching(message, ("ещё бой",))
-                        if not repeated:
-                            repeated = await click_matching(message, ("еще бой",))
-                        if repeated:
-                            state.scheduled_arena_clicks += 1
-                            state.last_signature = None
-                            logger.info(
-                                "Arena battle started: %s/5",
-                                state.scheduled_arena_clicks,
-                            )
-                            return True
-
-                    if state.scheduled_arena_clicks >= 5:
-                        await finish_arena_route()
+                    battle_button = select_battle_button(
+                        buttons,
+                        state.scheduled_arena_clicks,
+                    )
+                    if battle_button is not None:
+                        button_text, row, column = battle_button
+                        await asyncio.sleep(1.0)
+                        await message.click(i=row, j=column)
+                        state.scheduled_arena_clicks += 1
+                        state.last_signature = None
+                        logger.info(
+                            "Arena battle started: %s/%s (button=%s)",
+                            state.scheduled_arena_clicks,
+                            ARENA_MAX_BATTLES,
+                            button_text,
+                        )
                         return True
 
                     logger.info(
-                        "Waiting for arena repeat (%s/5); buttons=%s text=%s",
+                        "Waiting for arena battle button (%s/%s); buttons=%s text=%s",
                         state.scheduled_arena_clicks,
+                        ARENA_MAX_BATTLES,
                         texts,
                         message_text,
                     )
@@ -180,7 +178,7 @@ def patch_main() -> None:
         source,
         count=1,
     )
-    if arena_count != 1 and "Arena battle started: 1/5" not in source:
+    if arena_count != 1 and "select_battle_button(" not in source:
         raise RuntimeError("Could not patch arena route block in app/main.py")
 
     source = source.replace(
