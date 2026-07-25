@@ -136,12 +136,15 @@ def select_fishing_action(
     - после результата -> Забросить удочку;
     - просьба Ниджи -> Дать наживку и ждать новую поклёвку.
     """
-    # Событие Ниджи имеет самый высокий приоритет.
+    # Кнопка «Дать наживку» сама является точным признаком события Ниджи.
+    # Проверяем её раньше текста сообщения, потому что формулировка события
+    # может меняться или отсутствовать в отредактированном сообщении.
+    give_bait = find_button(buttons, GIVE_BAIT_MARKERS)
+    if give_bait is not None:
+        state.fishing_waiting_after_niji = True
+        return make_action(give_bait, "Дать наживку Ниджи", "fishing_give_bait")
+
     if contains_any(message_text, NIJI_MESSAGE_MARKERS):
-        give_bait = find_button(buttons, GIVE_BAIT_MARKERS)
-        if give_bait is not None:
-            state.fishing_waiting_after_niji = True
-            return make_action(give_bait, "Дать наживку Ниджи", "fishing_give_bait")
         return None, "fishing_wait_niji"
 
     # После передачи наживки не трогаем кнопку «Проверить удочку», пока игра
