@@ -14,11 +14,10 @@ from app.routes.events import (
     select_random_event_action,
 )
 from app.routes.farm import select_farm_action
+from app.routes.stamina import select_stamina_action
 from app.rules import (
-    LOW_RESOURCE_MARKERS,
     NEVER_CLICK,
     REPAIR_FLOW,
-    STAMINA_BUTTON_MARKERS,
     STANDARD_RULES,
     WORN_EQUIPMENT_MARKERS,
 )
@@ -102,18 +101,11 @@ class FarmerEngine:
                 self.state.repair_step = 0
                 self.state.return_to_floor_mode = False
 
-            if contains_any(message_text, LOW_RESOURCE_MARKERS):
-                for button_text, row, column in buttons:
-                    if contains_any(button_text, STAMINA_BUTTON_MARKERS):
-                        selected = (
-                            button_text,
-                            row,
-                            column,
-                            "Выпить зелье стамины",
-                            "stamina_potions",
-                        )
-                        selected_kind = "stamina"
-                        break
+            if selected is None:
+                selected, selected_kind = select_stamina_action(
+                    message_text,
+                    buttons,
+                )
 
             if selected is None and self.state.repair_mode:
                 if self.state.repair_step < len(REPAIR_FLOW):
