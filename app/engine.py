@@ -14,7 +14,7 @@ from app.routes.events import (
     select_random_event_action,
 )
 from app.routes.farm import select_farm_action
-from app.routes.stamina import select_stamina_action
+from app.routes.stamina import FALLBACK_FLOW, select_stamina_action
 from app.rules import (
     NEVER_CLICK,
     REPAIR_FLOW,
@@ -102,10 +102,22 @@ class FarmerEngine:
                 self.state.return_to_floor_mode = False
 
             if selected is None:
+                # Stamina receives all buttons because the fallback route must be
+                # allowed to use the explicit "Назад в исследование" button.
                 selected, selected_kind = select_stamina_action(
                     message_text,
-                    buttons,
+                    all_buttons,
+                    self.state,
                 )
+
+            if selected is None and selected_kind == "stamina_wait":
+                logger.info(
+                    "Waiting for stamina route step %s; buttons=%s",
+                    self.state.stamina_step + 1,
+                    [text for text, _, _ in all_buttons],
+                )
+                self.state.last_signature = signature
+                return False
 
             if selected is None and self.state.repair_mode:
                 if self.state.repair_step < len(REPAIR_FLOW):
@@ -158,9 +170,11 @@ class FarmerEngine:
 
             if selected is None:
                 logger.info(
-                    "No matching action. repair_mode=%s, repair_step=%s, floor=%s, buttons=%s",
+                    "No matching action. repair_mode=%s, repair_step=%s, stamina_mode=%s, stamina_step=%s, floor=%s, buttons=%s",
                     self.state.repair_mode,
                     self.state.repair_step,
+                    self.state.stamina_mode,
+                    self.state.stamina_step,
                     self.state.target_floor,
                     [text for text, _, _ in all_buttons],
                 )
@@ -169,12 +183,15 @@ class FarmerEngine:
 
             button_text, row, column, action_name, counter = selected
 
-            if "профил" in button_text or contains_any(button_text, NEVER_CLICK):
+            forbidden = "профил" in button_text or contains_any(button_text, NEVER_CLICK)
+            if forbidden and selected_kind != "stamina_step":
                 logger.error("Blocked forbidden button: %s", button_text)
                 self.state.last_signature = signature
                 return False
 
-            if (button_text.startswith("локации") or " локации" in button_text) and selected_kind != "repair_step":
+            if (
+                button_text.startswith("локации") or " локации" in button_text
+            ) and selected_kind != "repair_step":
                 logger.error("Blocked main-menu Locations outside repair: %s", button_text)
                 self.state.last_signature = signature
                 return False
@@ -202,7 +219,18 @@ class FarmerEngine:
             if counter:
                 setattr(self.state, counter, getattr(self.state, counter) + 1)
 
-            if selected_kind == "repair_step":
+            if selected_kind == "stamina_step":
+                self.state.stamina_step += 1
+                if self.state.stamina_step >= len(FALLBACK_FLOW):
+                    self.state.stamina_mode = False
+                    self.state.stamina_step = 0
+                    self.state.return_to_floor_mode = self.state.target_floor is not None
+                    logger.info(
+                        "Fallback stamina restoration completed; returning to exploration on floor %s",
+                        self.state.target_floor,
+                    )
+
+            elif selected_kind == "repair_step":
                 self.state.repair_step += 1
                 if self.state.repair_step >= len(REPAIR_FLOW):
                     self.state.repairs += 1
