@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 import re
 
 from telethon import TelegramClient, events
-
-from app.routes.combat import select_combat_button
 
 
 _original_send_message = TelegramClient.send_message
@@ -17,69 +14,15 @@ def _normalize(value: str | None) -> str:
     return " ".join(cleaned.split())
 
 
-def _buttons(message) -> list[tuple[str, int, int]]:
-    result: list[tuple[str, int, int]] = []
-    if not message or not message.buttons:
-        return result
-    for row_index, row in enumerate(message.buttons):
-        for column_index, button in enumerate(row):
-            result.append(
-                (_normalize(getattr(button, "text", "")), row_index, column_index)
-            )
-    return result
-
-
-async def _finish_active_battle(client: TelegramClient, entity) -> None:
-    empty_checks = 0
-    while True:
-        messages = await client.get_messages(entity, limit=1)
-        latest = messages[0] if messages else None
-        if latest is None:
-            return
-
-        text = _normalize(latest.raw_text)
-        buttons = _buttons(latest)
-        selected = select_combat_button(buttons)
-
-        if selected is not None:
-            _button_text, row, column = selected
-            empty_checks = 0
-            await latest.click(i=row, j=column)
-            await asyncio.sleep(1.2)
-            continue
-
-        # Иногда игра сначала показывает только кнопку входа/возобновления боя.
-        attack_entry = next(
-            (
-                (row, column)
-                for button_text, row, column in buttons
-                if "атаковать" in button_text
-            ),
-            None,
-        )
-        if attack_entry is not None:
-            empty_checks = 0
-            await latest.click(i=attack_entry[0], j=attack_entry[1])
-            await asyncio.sleep(1.2)
-            continue
-
-        if "вы находитесь в бою" in text:
-            empty_checks = 0
-            await asyncio.sleep(1.0)
-            continue
-
-        # Одно промежуточное сообщение без кнопок ещё не означает конец боя.
-        empty_checks += 1
-        if empty_checks < 3:
-            await asyncio.sleep(1.0)
-            continue
-
-        return
-
-
 async def guarded_send_message(self, entity, message="", *args, **kwargs):
-    if isinstance(message, str) and message.strip().lower() == "/start":
-        await _finish_active_battle(self, entity)
+    """Отправляет сообщения без скрытых игровых действий.
+
+    Раньше перед каждым исходящим /start этот модуль самостоятельно находил
+    активный бой и нажимал атаки. Такие клики выполнялись вне RuntimeState и
+    поэтому могли продолжаться даже после команды /off. Теперь /start только
+    отправляется адресату, а любые игровые действия выполняются исключительно
+    основным движком, который проверяет state.enabled.
+    """
     return await _original_send_message(self, entity, message, *args, **kwargs)
 
 
