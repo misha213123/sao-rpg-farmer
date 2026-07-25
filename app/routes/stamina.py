@@ -8,25 +8,31 @@ from app.state import RuntimeState
 ButtonInfo = tuple[str, int, int]
 SelectedAction = tuple[str, int, int, str, str | None]
 
+RECOVERY_MARKERS = (
+    "использовать восстановление стамины",
+    "восстановление стамины",
+)
+
 EXPLORATION_FLOW: tuple[tuple[tuple[str, ...], str, str | None], ...] = (
     (("баффы",), "Баффы для восстановления стамины", None),
     (("след",), "След", None),
     (
-        ("использовать восстановление стамины", "восстановление стамины"),
+        RECOVERY_MARKERS,
         "Использовать восстановление стамины",
         None,
     ),
     (("назад в исследование", "назад"), "Назад в исследование", None),
 )
 
-# Чёткий маршрут восстановления стамины во время боя с боссом:
-# Зелья -> След -> Использовать Восстановление стамины
-# -> Назад в исследование -> продолжить бой обычными боевыми правилами.
+# Маршрут восстановления стамины во время боя с боссом:
+# Зелья -> проверить прямую кнопку восстановления.
+# Если её нет: След -> Использовать Восстановление стамины.
+# Затем Назад в исследование -> продолжить бой обычными боевыми правилами.
 BATTLE_FLOW: tuple[tuple[tuple[str, ...], str, str | None], ...] = (
     (("зелья",), "Открыть зелья в бою", None),
     (("след",), "След в меню зелий", None),
     (
-        ("использовать восстановление стамины", "восстановление стамины"),
+        RECOVERY_MARKERS,
         "Использовать восстановление стамины в бою",
         None,
     ),
@@ -84,6 +90,28 @@ def select_stamina_action(
     if state.stamina_step >= len(flow):
         reset_stamina_route(state)
         return None, None
+
+    # После открытия «Баффы» или «Зелья» сначала проверяем, доступна ли
+    # «Использовать Восстановление стамины» прямо на текущем экране.
+    # Если доступна, пропускаем «След». Engine после клика увеличит шаг ещё на 1,
+    # поэтому заранее ставим индекс действия восстановления (2), чтобы следующим
+    # шагом стал возврат «Назад в исследование» (3).
+    if state.stamina_step == 1:
+        recovery_action_name = (
+            "Использовать восстановление стамины в бою"
+            if state.stamina_route == "battle"
+            else "Использовать восстановление стамины"
+        )
+        for button_text, row, column in buttons:
+            if contains_any(button_text, RECOVERY_MARKERS):
+                state.stamina_step = 2
+                return (
+                    button_text,
+                    row,
+                    column,
+                    recovery_action_name,
+                    None,
+                ), "stamina_step"
 
     markers, action_name, counter = flow[state.stamina_step]
     for button_text, row, column in buttons:
