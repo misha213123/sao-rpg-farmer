@@ -2,21 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from app.rules import LOW_RESOURCE_MARKERS, STAMINA_BUTTON_MARKERS
+
 ButtonInfo = tuple[str, int, int]
 SelectedAction = tuple[str, int, int, str, str | None]
-
-
-LOW_STAMINA_MARKERS = (
-    "недостаточно стамины",
-    "стамина закончилась",
-    "не хватает стамины",
-    "10% стамины",
-)
-
-QUICK_POTION_MARKERS = (
-    "выпить зелье стамины",
-    "зелье стамины",
-)
 
 
 def contains_any(value: str, markers: Iterable[str]) -> bool:
@@ -28,11 +17,11 @@ def select_stamina_action(
     buttons: list[ButtonInfo],
 ) -> tuple[SelectedAction | None, str | None]:
     """Select the existing quick stamina-potion action without changing behavior."""
-    if not contains_any(message_text, LOW_STAMINA_MARKERS):
+    if not contains_any(message_text, LOW_RESOURCE_MARKERS):
         return None, None
 
     for button_text, row, column in buttons:
-        if contains_any(button_text, QUICK_POTION_MARKERS):
+        if contains_any(button_text, STAMINA_BUTTON_MARKERS):
             return (
                 button_text,
                 row,
