@@ -1,34 +1,44 @@
 from __future__ import annotations
 
-from app.routes.base import find_button, has_text
+from collections.abc import Iterable
+
+ButtonInfo = tuple[str, int, int]
+SelectedAction = tuple[str, int, int, str, str | None]
 
 
-QUICK_POTION_MARKERS = ("выпить зелье стамины",)
-BUFFS_MARKERS = ("баффы",)
-TRACE_MARKERS = ("след",)
-RESTORE_MARKERS = ("использовать восстановление стамины",)
-BACK_TO_RESEARCH_MARKERS = ("назад в исследование",)
+LOW_STAMINA_MARKERS = (
+    "недостаточно стамины",
+    "стамина закончилась",
+    "не хватает стамины",
+    "10% стамины",
+)
+
+QUICK_POTION_MARKERS = (
+    "выпить зелье стамины",
+    "зелье стамины",
+)
 
 
-def low_stamina(message) -> bool:
-    """Detect the game's low-stamina screen without relying on emoji."""
-    return has_text(message, "стамина") and (
-        has_text(message, "10%")
-        or has_text(message, "недостаточно стамины")
-        or has_text(message, "стамина закончилась")
-    )
+def contains_any(value: str, markers: Iterable[str]) -> bool:
+    return any(marker in value for marker in markers)
 
 
-def find_quick_potion(message):
-    return find_button(message, QUICK_POTION_MARKERS)
+def select_stamina_action(
+    message_text: str,
+    buttons: list[ButtonInfo],
+) -> tuple[SelectedAction | None, str | None]:
+    """Select the existing quick stamina-potion action without changing behavior."""
+    if not contains_any(message_text, LOW_STAMINA_MARKERS):
+        return None, None
 
+    for button_text, row, column in buttons:
+        if contains_any(button_text, QUICK_POTION_MARKERS):
+            return (
+                button_text,
+                row,
+                column,
+                "Выпить зелье стамины",
+                "stamina_potions",
+            ), "stamina"
 
-def find_fallback_step(message, step: str):
-    markers_by_step = {
-        "buffs": BUFFS_MARKERS,
-        "trace": TRACE_MARKERS,
-        "restore": RESTORE_MARKERS,
-        "back": BACK_TO_RESEARCH_MARKERS,
-    }
-    markers = markers_by_step.get(step)
-    return find_button(message, markers) if markers else None
+    return None, None
