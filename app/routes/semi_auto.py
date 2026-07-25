@@ -3,14 +3,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from app.routes.combat import select_combat_action
+from app.routes.farm import select_farm_action
 from app.routes.repair import select_repair_action, start_repair_if_needed
 from app.state import RuntimeState
 
 ButtonInfo = tuple[str, int, int]
 SelectedAction = tuple[str, int, int, str, str | None]
-
-# Полуавтоматический режим пока изолирован и не подключён к main.py/engine.py.
-# Он предназначен для отдельного режима №4 после безопасного подключения.
 
 CONTINUE_MARKERS = ("продолжить исследование",)
 PLAYER_ENCOUNTER_MARKERS = (
@@ -85,22 +83,6 @@ def select_player_rob_action(
     return None, "semi_auto_wait"
 
 
-def select_continue_action(
-    buttons: list[ButtonInfo],
-) -> tuple[SelectedAction | None, str | None]:
-    for button_text, row, column in buttons:
-        if contains_any(button_text, CONTINUE_MARKERS):
-            return (
-                button_text,
-                row,
-                column,
-                "Продолжить исследование",
-                None,
-            ), "semi_auto_continue"
-
-    return None, None
-
-
 def select_semi_auto_action(
     message_text: str,
     buttons: list[ButtonInfo],
@@ -111,10 +93,11 @@ def select_semi_auto_action(
     Automatic actions:
     1. Existing repair route, including one click on «Починить всё».
     2. Encounter with another player -> «Ограбить».
-    3. Boss/combat actions using the existing strict combat priority.
-    4. «Продолжить исследование».
+    3. Boss and ordinary mob combat using the existing strict combat priority.
+    4. Full ordinary navigation: main menu -> Explore -> selected floor ->
+       last location -> Start/Continue exploration.
 
-    All stamina handling, random events, clanmate encounters, treasure screens,
+    Stamina handling, random events, clanmate encounters, treasure screens,
     Arena, Guild ranking and unknown screens are left for the player.
     """
     # Починка должна работать так же, как в полном режиме.
@@ -131,12 +114,15 @@ def select_semi_auto_action(
     if is_manual_screen(message_text, buttons):
         return None, "semi_auto_manual"
 
+    # Бьём босса и обычных мобов тем же строгим приоритетом атак.
     combat_action, combat_kind = select_combat_action(buttons)
     if combat_action is not None:
         return combat_action, combat_kind
 
-    continue_action, continue_kind = select_continue_action(buttons)
-    if continue_action is not None:
-        return continue_action, continue_kind
+    # Полностью проходим обычный маршрут до выбранного этажа и продолжаем фарм.
+    if state.target_floor is not None:
+        farm_action, farm_kind = select_farm_action(buttons, state.target_floor)
+        if farm_action is not None:
+            return farm_action, farm_kind
 
     return None, "semi_auto_wait"
