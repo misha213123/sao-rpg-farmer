@@ -67,8 +67,8 @@ def select_stamina_action(
 ) -> tuple[SelectedAction | None, str | None]:
     """Choose HP potion, stamina potion, exploration recovery, or boss recovery."""
 
-    # Плашка HP имеет такой же высокий приоритет, как быстрая кнопка стамины.
-    # Если кнопка появилась, нажимаем её сразу и затем продолжаем текущий маршрут.
+    # Быстрые кнопки зелий имеют максимальный приоритет. Проверяем саму кнопку,
+    # а не только текст сообщения: формулировка предупреждения в игре может меняться.
     for button_text, row, column in buttons:
         if contains_any(button_text, HP_POTION_BUTTON_MARKERS):
             return (
@@ -79,19 +79,19 @@ def select_stamina_action(
                 None,
             ), "hp_potion"
 
+    for button_text, row, column in buttons:
+        if contains_any(button_text, STAMINA_BUTTON_MARKERS):
+            return (
+                button_text,
+                row,
+                column,
+                "Выпить зелье стамины",
+                "stamina_potions",
+            ), "stamina"
+
     low_resource = contains_any(message_text, LOW_RESOURCE_MARKERS)
 
     if low_resource and not state.stamina_mode:
-        for button_text, row, column in buttons:
-            if contains_any(button_text, STAMINA_BUTTON_MARKERS):
-                return (
-                    button_text,
-                    row,
-                    column,
-                    "Выпить зелье стамины",
-                    "stamina_potions",
-                ), "stamina"
-
         has_battle_potions = any(
             button_text == "зелья" or button_text.endswith(" зелья")
             for button_text, _, _ in buttons
