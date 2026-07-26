@@ -43,11 +43,13 @@ def is_main_explore_button(button_text: str) -> bool:
 def select_farm_action(
     buttons: list[ButtonInfo],
     target_floor: int,
+    target_location: int | None = None,
 ) -> tuple[RouteAction | None, str | None]:
-    """Select the next action of the existing ordinary farming route.
+    """Select the next action of the ordinary farming route.
 
-    Priority is intentionally identical to the former engine implementation:
-    continue -> start -> Explore -> floor -> last location -> main menu.
+    Location buttons are already flattened by Telegram row by row: left to right,
+    then the next row. Therefore a single centred bottom button naturally becomes
+    the last location in the list.
     """
     for button_text, row, column in buttons:
         if "продолжить исследование" in button_text:
@@ -93,14 +95,17 @@ def select_farm_action(
         item for item in buttons if is_exploration_location(item[0])
     ]
     if location_buttons:
-        button_text, row, column = location_buttons[-1]
-        return (
-            button_text,
-            row,
-            column,
-            "Последняя локация",
-            None,
-        ), "navigation"
+        location_index = (target_location or len(location_buttons)) - 1
+        if 0 <= location_index < len(location_buttons):
+            button_text, row, column = location_buttons[location_index]
+            return (
+                button_text,
+                row,
+                column,
+                f"Локация {location_index + 1}",
+                None,
+            ), "navigation"
+        return None, "location_unavailable"
 
     for button_text, row, column in buttons:
         if "главное меню" in button_text:
