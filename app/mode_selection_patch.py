@@ -7,6 +7,7 @@ import re
 ROOT = pathlib.Path(__file__).resolve().parent
 MAIN_PATH = ROOT / "main.py"
 STATE_PATH = ROOT / "state.py"
+ENGINE_PATH = ROOT / "engine.py"
 
 
 def patch_state() -> None:
@@ -24,11 +25,46 @@ def patch_state() -> None:
     STATE_PATH.write_text(source, encoding="utf-8")
 
 
+def patch_engine() -> None:
+    source = ENGINE_PATH.read_text(encoding="utf-8")
+    old_call = '''                selected, selected_kind = select_farm_action(
+                    buttons,
+                    self.state.target_floor,
+                )'''
+    new_call = '''                selected, selected_kind = select_farm_action(
+                    buttons,
+                    self.state.target_floor,
+                    self.state.target_location,
+                )'''
+    source = source.replace(old_call, new_call, 1)
+    ENGINE_PATH.write_text(source, encoding="utf-8")
+
+
 def patch_main() -> None:
     source = MAIN_PATH.read_text(encoding="utf-8")
 
-    # Startup restoration must respect the latest explicit /off command.
-    # A later /start is only a navigation command and must never turn automation on.
+    if "def parse_floor_location(" not in source:
+        marker = '''def parse_plain_floor(value: str) -> int | None:
+    value = value.strip()
+    if not value.isdigit():
+        return None
+    floor = int(value)
+    return floor if floor > 0 else None
+'''
+        replacement = marker + '''
+
+def parse_floor_location(value: str) -> tuple[int, int] | None:
+    match = re.fullmatch(r"\\s*(\\d+)\\.(\\d+)\\s*", value)
+    if not match:
+        return None
+    floor = int(match.group(1))
+    location = int(match.group(2))
+    if floor <= 0 or not 1 <= location <= 7:
+        return None
+    return floor, location
+'''
+        source = source.replace(marker, replacement, 1)
+
     startup_off_old = '''        if command == "/off":
             restored_enabled = False
             pending_floor = False
@@ -38,6 +74,7 @@ def patch_main() -> None:
             restored_enabled = False
             pending_floor = False
             state.target_floor = None
+            state.target_location = None
             continue
 '''
     source = source.replace(startup_off_old, startup_off_new, 1)
@@ -49,15 +86,26 @@ def patch_main() -> None:
         1,
     )
 
-    # chats="me" works inconsistently between Telethon sessions. Listen to all
-    # outgoing messages and then explicitly accept only Saved Messages.
+    old_pending_restore = '''        if pending_floor:
+            floor = parse_plain_floor(raw)
+            if floor is not None:
+                state.target_floor = floor
+                restored_enabled = True
+                pending_floor = False
+            continue
+'''
+    new_pending_restore = '''        if pending_floor:
+            selection = parse_floor_location(raw)
+            if selection is not None:
+                state.target_floor, state.target_location = selection
+                restored_enabled = True
+                pending_floor = False
+            continue
+'''
+    source = source.replace(old_pending_restore, new_pending_restore, 1)
+
     source = source.replace(
         '@client.on(events.NewMessage(chats="me", outgoing=True))',
-        '@client.on(events.NewMessage(outgoing=True))',
-        1,
-    )
-    source = source.replace(
-        '@client.on(events.NewMessage(outgoing=True))',
         '@client.on(events.NewMessage(outgoing=True))',
         1,
     )
@@ -132,6 +180,7 @@ def patch_main() -> None:
                 state.enabled = True
                 state.awaiting_floor = False
                 state.target_floor = None
+                state.target_location = None
                 state.return_to_floor_mode = False
                 state.repair_mode = False
                 await event.reply(
@@ -152,7 +201,8 @@ def patch_main() -> None:
                 mode_name = "Полуавтоматический фарм"
             await event.reply(
                 f"Выбран режим: {mode_name}\\n"
-                "На каком этаже фармить? Напиши только номер, например: 25"
+                "Напиши этаж и локацию в формате ЭТАЖ.ЛОКАЦИЯ, например: 14.1\\n"
+                "Локация должна быть от 1 до 7."
             )
             return
 
@@ -163,6 +213,62 @@ def patch_main() -> None:
             mode_block + awaiting_floor_marker,
             1,
         )
+
+    old_awaiting = '''        if state.awaiting_floor and not command.startswith("/"):
+            floor = parse_plain_floor(raw)
+            if floor is None:
+                await event.reply("Напиши номер этажа цифрами, например: 25")
+                return
+            await activate_floor(floor, event)
+            return
+'''
+    new_awaiting = '''        if state.awaiting_floor and not command.startswith("/"):
+            selection = parse_floor_location(raw)
+            if selection is None:
+                await event.reply(
+                    "Напиши этаж и локацию в формате ЭТАЖ.ЛОКАЦИЯ, например: 14.1\\n"
+                    "Локация должна быть от 1 до 7."
+                )
+                return
+            floor, location = selection
+            await activate_floor(floor, event, location)
+            return
+'''
+    source = source.replace(old_awaiting, new_awaiting, 1)
+
+    source = source.replace(
+        '    async def activate_floor(floor: int, event: events.NewMessage.Event) -> None:',
+        '    async def activate_floor(\n        floor: int,\n        event: events.NewMessage.Event,\n        location: int | None = None,\n    ) -> None:',
+        1,
+    )
+    activate_marker = '''        state.target_floor = floor
+        state.awaiting_floor = False
+        state.enabled = True
+'''
+    activate_replacement = '''        state.target_floor = floor
+        state.target_location = location or state.target_location or 1
+        state.awaiting_floor = False
+        state.enabled = True
+        if state.automation_mode not in ("farm", "full", "semi_auto"):
+            state.automation_mode = "farm"
+        logger.info(
+            "Floor/location selected from Saved Messages: %s.%s",
+            floor,
+            state.target_location,
+        )
+'''
+    if "Floor/location selected from Saved Messages" not in source:
+        source = source.replace(activate_marker, activate_replacement, 1)
+
+    source = source.replace(
+        'f"Автоматизация включена ✅\\nВыбран этаж: {floor}\\n"',
+        'f"Автоматизация включена ✅\\nЭтаж: {floor}\\nЛокация: {state.target_location}\\n"',
+        1,
+    )
+    source = source.replace(
+        "Перехожу: Главное меню → Исследовать → этаж → последняя Локация → Начать/Продолжить исследование.",
+        "Перехожу: Главное меню → Исследовать → этаж → выбранная локация → Начать/Продолжить исследование.",
+    )
 
     on_pattern = re.compile(
         r'        elif command == "/on":\n.*?(?=        elif command\.startswith\("/floor"\):)',
@@ -190,20 +296,6 @@ def patch_main() -> None:
 '''
     source = on_pattern.sub(lambda _match: on_replacement, source, count=1)
 
-    activate_marker = '''        state.target_floor = floor
-        state.awaiting_floor = False
-        state.enabled = True
-'''
-    activate_replacement = '''        state.target_floor = floor
-        state.awaiting_floor = False
-        state.enabled = True
-        if state.automation_mode not in ("farm", "full", "semi_auto"):
-            state.automation_mode = "farm"
-        logger.info("Floor selected from Saved Messages: %s", floor)
-'''
-    if "Floor selected from Saved Messages" not in source and activate_marker in source:
-        source = source.replace(activate_marker, activate_replacement, 1)
-
     off_marker = '''        elif command == "/off":
             state.enabled = False
 '''
@@ -214,6 +306,7 @@ def patch_main() -> None:
             state.awaiting_floor = False
             state.automation_mode = "off"
             state.target_floor = None
+            state.target_location = None
             state.return_to_floor_mode = False
             state.return_to_floor_step = 0
             state.repair_mode = False
@@ -226,7 +319,7 @@ def patch_main() -> None:
             state.scheduled_step = 0
             state.last_signature = None
 '''
-    if "Saved command received: /off" not in source and off_marker in source:
+    if "Saved command received: /off" not in source:
         source = source.replace(off_marker, off_replacement, 1)
 
     guild_condition = re.compile(
@@ -265,6 +358,7 @@ def patch_main() -> None:
 
 def patch_all() -> None:
     patch_state()
+    patch_engine()
     patch_main()
 
     from app.fishing_patch import patch_all as patch_fishing
