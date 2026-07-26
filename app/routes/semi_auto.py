@@ -113,9 +113,10 @@ def select_semi_auto_action(
     if player_action is not None or player_kind == "semi_auto_wait":
         return player_action, player_kind
 
-    if is_manual_screen(message_text, buttons):
-        return None, "semi_auto_manual"
-
+    # Разрешённые действия проверяются раньше общего ручного фильтра.
+    # Некоторые экраны босса и экран после выбора последней локации содержат
+    # общий текст «выберите действие», из-за которого полуавтомат раньше
+    # останавливался до «Начать исследование» и до боевых кнопок.
     combat_action, combat_kind = select_combat_action(buttons)
     if combat_action is not None:
         return combat_action, combat_kind
@@ -124,5 +125,8 @@ def select_semi_auto_action(
         farm_action, farm_kind = select_farm_action(buttons, state.target_floor)
         if farm_action is not None:
             return farm_action, farm_kind
+
+    if is_manual_screen(message_text, buttons):
+        return None, "semi_auto_manual"
 
     return None, "semi_auto_wait"
