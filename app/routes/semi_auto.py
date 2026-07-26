@@ -16,10 +16,6 @@ PLAYER_ENCOUNTER_MARKERS = (
 )
 ROB_MARKERS = ("ограбить",)
 
-# На этих специальных экранах полуавтоматический режим ничего не нажимает.
-# Важно: обычные строки статуса вроде «Стамина: 85/100» здесь не используются,
-# потому что они присутствуют почти в каждом сообщении исследования и раньше
-# блокировали переход на этаж, «Начать исследование» и «Продолжить исследование».
 MANUAL_MESSAGE_MARKERS = (
     "встреча с соклановцем",
     "защита границ",
@@ -37,8 +33,6 @@ MANUAL_MESSAGE_MARKERS = (
     "арена",
 )
 
-# «Баффы» и «Зелья» не блокируют обычное меню сами по себе. Но когда игра
-# показывает явное действие восстановления или событие, скрипт ждёт игрока.
 MANUAL_BUTTON_MARKERS = (
     "выпить зелье стамины",
     "использовать восстановление стамины",
@@ -54,9 +48,7 @@ def contains_any(value: str, markers: Iterable[str]) -> bool:
 
 
 def is_manual_screen(message_text: str, buttons: list[ButtonInfo]) -> bool:
-    """Return True only when the player must handle the current screen manually."""
     if contains_any(message_text, MANUAL_MESSAGE_MARKERS):
-        # Встреча с игроком является исключением: её обрабатываем автоматически.
         if contains_any(message_text, PLAYER_ENCOUNTER_MARKERS):
             return False
         return True
@@ -92,18 +84,7 @@ def select_semi_auto_action(
     buttons: list[ButtonInfo],
     state: RuntimeState,
 ) -> tuple[SelectedAction | None, str | None]:
-    """Choose only actions allowed in the semi-automatic mode.
-
-    Automatic actions:
-    1. Existing repair route, including one click on «Починить всё».
-    2. Encounter with another player -> «Ограбить».
-    3. Boss and ordinary mob combat using the existing strict combat priority.
-    4. Full ordinary navigation: main menu -> Explore -> selected floor ->
-       last location -> Start/Continue exploration.
-
-    Stamina handling, random events, clanmate encounters, treasure screens,
-    Arena, Guild ranking and unknown screens are left for the player.
-    """
+    """Choose only actions allowed in the semi-automatic mode."""
     start_repair_if_needed(message_text, state)
     repair_action, repair_kind = select_repair_action(buttons, state)
     if repair_action is not None or repair_kind == "repair_wait":
@@ -113,16 +94,16 @@ def select_semi_auto_action(
     if player_action is not None or player_kind == "semi_auto_wait":
         return player_action, player_kind
 
-    # Разрешённые действия проверяются раньше общего ручного фильтра.
-    # Некоторые экраны босса и экран после выбора последней локации содержат
-    # общий текст «выберите действие», из-за которого полуавтомат раньше
-    # останавливался до «Начать исследование» и до боевых кнопок.
     combat_action, combat_kind = select_combat_action(buttons)
     if combat_action is not None:
         return combat_action, combat_kind
 
     if state.target_floor is not None:
-        farm_action, farm_kind = select_farm_action(buttons, state.target_floor)
+        farm_action, farm_kind = select_farm_action(
+            buttons,
+            state.target_floor,
+            state.target_location,
+        )
         if farm_action is not None:
             return farm_action, farm_kind
 
