@@ -12,6 +12,7 @@ class RuntimeState:
     enabled: bool = False
     awaiting_floor: bool = False
     target_floor: int | None = None
+    target_location: int | None = None
     return_to_floor_mode: bool = False
     return_to_floor_step: int = 0
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -76,6 +77,9 @@ class RuntimeState:
         self.reset_fishing_stats_if_needed()
         status = "включён ✅" if self.enabled else "выключен ⛔"
         floor = str(self.target_floor) if self.target_floor is not None else "не выбран"
+        location = (
+            str(self.target_location) if self.target_location is not None else "не выбрана"
+        )
         repair_status = f"да, шаг {self.repair_step + 1}" if self.repair_mode else "нет"
         stamina_status = (
             f"да, маршрут {self.stamina_route or 'не выбран'}, шаг {self.stamina_step + 1}"
@@ -95,6 +99,7 @@ class RuntimeState:
         return (
             f"Статус: {status}\n"
             f"Этаж: {floor}\n"
+            f"Локация: {location}\n"
             f"Аптайм: {self.uptime_text()}\n"
             f"Нажатий: {self.clicks}\n"
             f"Атак: {self.fights}\n"
