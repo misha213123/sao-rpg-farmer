@@ -58,6 +58,21 @@ def select_random_event_action(
     Special events are handled before generic event detection so they work even
     when the game message does not contain the usual random-event markers.
     """
+    # Событие второго этажа «Мастер боевых искусств» обрабатывается только
+    # обычным фармом: полуавтоматический режим использует отдельный маршрут и
+    # этот модуль не вызывает.
+    if "мастер боевых искусств" in message_text:
+        for button_text, row, column in buttons:
+            if "усилить силу" in button_text:
+                return (
+                    button_text,
+                    row,
+                    column,
+                    "Мастер боевых искусств: усилить силу",
+                    None,
+                ), "martial_arts_master"
+        return None, "martial_arts_master_wait"
+
     if "встреча с соклановцем" in message_text:
         for button_text, row, column in buttons:
             if "пройти мимо" in button_text:
