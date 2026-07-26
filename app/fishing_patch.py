@@ -97,6 +97,14 @@ def patch_engine() -> None:
             ) and selected_kind not in ("repair_step", "fishing_navigation"):'''
     source = source.replace(old_locations_guard, new_locations_guard, 1)
 
+    # HP potion remains forbidden for generic rules, but is allowed when selected
+    # explicitly by the resource route, exactly like stamina recovery actions.
+    source = source.replace(
+        '            if forbidden and selected_kind != "stamina_step":',
+        '            if forbidden and selected_kind not in ("stamina_step", "hp_potion"):',
+        1,
+    )
+
     ENGINE_PATH.write_text(source, encoding="utf-8")
 
 
