@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from app.rules import LOW_RESOURCE_MARKERS, STAMINA_BUTTON_MARKERS
+from app.rules import (
+    HP_POTION_BUTTON_MARKERS,
+    LOW_RESOURCE_MARKERS,
+    STAMINA_BUTTON_MARKERS,
+)
 from app.state import RuntimeState
 
 ButtonInfo = tuple[str, int, int]
@@ -61,7 +65,20 @@ def select_stamina_action(
     buttons: list[ButtonInfo],
     state: RuntimeState,
 ) -> tuple[SelectedAction | None, str | None]:
-    """Choose quick potion, exploration recovery, or boss-battle recovery route."""
+    """Choose HP potion, stamina potion, exploration recovery, or boss recovery."""
+
+    # Плашка HP имеет такой же высокий приоритет, как быстрая кнопка стамины.
+    # Если кнопка появилась, нажимаем её сразу и затем продолжаем текущий маршрут.
+    for button_text, row, column in buttons:
+        if contains_any(button_text, HP_POTION_BUTTON_MARKERS):
+            return (
+                button_text,
+                row,
+                column,
+                "Выпить зелье HP",
+                None,
+            ), "hp_potion"
+
     low_resource = contains_any(message_text, LOW_RESOURCE_MARKERS)
 
     if low_resource and not state.stamina_mode:
