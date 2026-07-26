@@ -49,26 +49,34 @@ def patch_main() -> None:
         1,
     )
 
+    # chats="me" works inconsistently between Telethon sessions. Listen to all
+    # outgoing messages and then explicitly accept only Saved Messages.
+    source = source.replace(
+        '@client.on(events.NewMessage(chats="me", outgoing=True))',
+        '@client.on(events.NewMessage(outgoing=True))',
+        1,
+    )
     source = source.replace(
         '@client.on(events.NewMessage(outgoing=True))',
-        '@client.on(events.NewMessage(chats="me", outgoing=True))',
+        '@client.on(events.NewMessage(outgoing=True))',
         1,
     )
 
-    saved_handler_header = '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
+    native_saved_handler_header = '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
+        raw = (event.raw_text or "").strip()'''
+    guarded_saved_handler_header = '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
         event_chat_id = getattr(event, "chat_id", None)
         peer_id = getattr(event.message, "peer_id", None)
         peer_user_id = getattr(peer_id, "user_id", None)
         if event_chat_id != me.id and peer_user_id != me.id:
             return
         raw = (event.raw_text or "").strip()'''
-    native_saved_handler_header = '''    async def on_saved_message(event: events.NewMessage.Event) -> None:
-        raw = (event.raw_text or "").strip()'''
-    source = source.replace(
-        saved_handler_header,
-        native_saved_handler_header,
-        1,
-    )
+    if guarded_saved_handler_header not in source:
+        source = source.replace(
+            native_saved_handler_header,
+            guarded_saved_handler_header,
+            1,
+        )
 
     awaiting_floor_marker = '        if state.awaiting_floor and not command.startswith("/"):\n'
     mode_block = '''        if state.awaiting_mode and not command.startswith("/"):
