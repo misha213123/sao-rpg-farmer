@@ -52,12 +52,27 @@ def select_player_encounter_action(
 def select_random_event_action(
     message_text: str,
     buttons: list[ButtonInfo],
+    automation_mode: str = "farm",
 ) -> tuple[RouteAction | None, str | None]:
     """Select an action for blocking exploration events.
 
     Special events are handled before generic event detection so they work even
     when the game message does not contain the usual random-event markers.
     """
+    # Событие 17 этажа «Логово теней» автоматически закрываем только в режимах
+    # обычного фарма. Полуавтомат, рыбалка и режим только Арена/Гильдия не трогаем.
+    if automation_mode in ("farm", "full") and "логово теней" in message_text:
+        for button_text, row, column in buttons:
+            if button_text == "уйти" or button_text.endswith(" уйти"):
+                return (
+                    button_text,
+                    row,
+                    column,
+                    "Логово теней: уйти",
+                    None,
+                ), "shadow_lair_exit"
+        return None, "shadow_lair_wait"
+
     # Событие второго этажа «Мастер боевых искусств» обрабатывается только
     # обычным фармом: полуавтоматический режим использует отдельный маршрут и
     # этот модуль не вызывает.
