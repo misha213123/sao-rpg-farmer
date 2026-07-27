@@ -97,36 +97,31 @@ def patch_main() -> None:
     if count != 1:
         raise RuntimeError("Could not replace scheduled_loop in app/main.py")
 
-    # На втором аккаунте последнее сообщение игры иногда не содержит кнопок
-    # маршрута. Тогда запрашиваем свежее главное меню через /start. Новое
-    # сообщение игрового бота будет обработано штатным on_game_message.
-    activate_pattern = re.compile(
-        r'(    async def activate_floor\(floor: int, event: events\.NewMessage\.Event\) -> None:\n.*?'
-        r'        if not await process_latest\(\):\n)'
-        r'(            await event\.reply\("Жду следующего сообщения игры, чтобы продолжить переход\."\)\n)'
-        r'(\n    @client\.on\(events\.NewMessage\(from_users=game_bot\)\))',
-        re.DOTALL,
-    )
-    activate_replacement = (
-        r'\1'
-        '            logger.info("No usable latest game message; requesting fresh menu via /start")\n'
-        '            await client.send_message(game_bot, "/start")\n'
-        '            await event.reply("Последний экран не подошёл. Запрашиваю главное меню и продолжаю маршрут.")\n'
-        r'\3'
-    )
-    source, activate_count = activate_pattern.subn(
-        lambda match: (
-            match.group(1)
-            + '            logger.info("No usable latest game message; requesting fresh menu via /start")\n'
-            + '            await client.send_message(game_bot, "/start")\n'
-            + '            await event.reply("Последний экран не подошёл. Запрашиваю главное меню и продолжаю маршрут.")\n'
-            + match.group(3)
-        ),
-        source,
-        count=1,
-    )
-    if activate_count != 1 and "No usable latest game message" not in source:
-        raise RuntimeError("Could not patch activate_floor fallback in app/main.py")
+    # Поддерживаем обе сигнатуры: старую activate_floor(floor, event)
+    # и новую activate_floor(floor, event, location=None).
+    # Важно: патч не должен падать, если fallback уже добавлен ранее.
+    if "No usable latest game message" not in source:
+        activate_pattern = re.compile(
+            r'(    async def activate_floor\(.*?\) -> None:\n.*?)'
+            r'(        if not await process_latest\(\):\n)'
+            r'(            await event\.reply\("Жду следующего сообщения игры, чтобы продолжить переход\."\)\n)'
+            r'(\n    @client\.on\(events\.NewMessage\(from_users=game_bot\)\))',
+            re.DOTALL,
+        )
+        source, activate_count = activate_pattern.subn(
+            lambda match: (
+                match.group(1)
+                + match.group(2)
+                + '            logger.info("No usable latest game message; requesting fresh menu via /start")\n'
+                + '            await client.send_message(game_bot, "/start")\n'
+                + '            await event.reply("Последний экран не подошёл. Запрашиваю главное меню и продолжаю маршрут.")\n'
+                + match.group(4)
+            ),
+            source,
+            count=1,
+        )
+        if activate_count != 1:
+            raise RuntimeError("Could not patch activate_floor fallback in app/main.py")
 
     # Показываем выбранные минуты в /status без изменения основной логики статуса.
     status_call = '        elif command == "/status":\n            await event.reply(state.status_text())'
